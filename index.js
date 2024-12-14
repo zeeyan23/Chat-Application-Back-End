@@ -249,12 +249,13 @@ app.post('/messages',upload.single("file"),async (req, res)=>{
             return res.status(404).json({ message: "Recipient not found or push token missing." });
         }
         const sender = await UserModel.findById(senderId);
+        const userName = sender.user_name;
         const notificationData = {
             to: recipient.expoPushToken, // Push token of the recipient
             sound: 'default',
             title: `${messageType} Message from ${sender.user_name}`,
             body: messageType === 'text' ? message : `You received a ${messageType}.`,
-            data: { senderId, recepientId, messageType }, // Optional custom data
+            data: { senderId, recepientId, messageType, userName}, // Optional custom data
         };
 
         // Send push notification using Expo Push Notification service
@@ -301,3 +302,54 @@ app.get('/get-messages/:senderId/:recepientId',async (req, res)=>{
 //         res.sendStatus(500);
 //     }
 // })
+
+
+//delete messages
+app.post('/deleteMessages/',async (req, res)=>{
+    try {
+        const {messages} = req.body;
+        console.log(req.body)
+        if(!Array.isArray(messages) || messages.length === 0){
+            return res.status(400).json({message: "invalid req body"});
+        }
+        await MessageModel.deleteMany({_id:{$in: messages}})       
+
+        res.json({messages : "Message deleted successfully"})
+
+    } catch (error) {
+        console.log(error)
+        res.sendStatus(500);
+    }
+})
+
+app.get('/friend-requests/sent/:userId',async (req, res)=>{
+
+    const {currentUserId} = req.params;
+
+    try {
+        const user = await UserModel.findById(currentUserId).populate("sentFriendRequests","user_name email").lean();
+        const sentFriendRequests = user.sentFriendRequests;
+        
+        res.json(sentFriendRequests);
+    } catch (error) {
+        res.sendStatus(500);
+    }
+})
+
+app.get('/friends/:userId',async (req, res)=>{
+
+    const {currentUserId} = req.params;
+
+    try {
+        UserModel.findById(currentUserId).populate("friends").then((user)=>{
+            if(!user){
+                res.status(404).json({message: "user not found"});
+            }
+
+            const friendIds= user.friends.map((friend)=> friend._id);
+            res.status(200).json(friendIds);
+        });
+    } catch (error) {
+        res.sendStatus(500);
+    }
+})
