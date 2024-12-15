@@ -93,31 +93,39 @@ app.post('/user_login',(req, res)=>{
 })
 
 //retrive all users
-app.get('/all_users/:userId', async (req, res) => {
-    const currentUser = req.params.userId;
+// app.get('/all_users/:userId', async (req, res) => {
+//     const currentUser = req.params.userId;
 
-    try {
-        // Fetch the current user to get their friends array
-        const user = await UserModel.findById(currentUser);
+//     try {
+//         const user = await UserModel.findById(currentUser);
 
-        if (!user) {
-            return res.status(404).json({ message: "User not found" });
-        }
+//         if (!user) {
+//             return res.status(404).json({ message: "User not found" });
+//         }
+//         const friendsIds = user.friends.map(friend => friend.toString());
+//         const users = await UserModel.find({
+//             _id: { $nin: [...friendsIds, currentUser] }
+//         });
 
-        // Extract friend IDs to exclude
-        const friendsIds = user.friends.map(friend => friend.toString());
+//         res.status(200).json({ users });
+//     } catch (error) {
+//         console.log("Error in finding the users", error);
+//         res.status(500).json({ message: "Error in finding the users" });
+//     }
+// });
 
-        // Find users excluding the current user and their friends
-        const users = await UserModel.find({
-            _id: { $nin: [...friendsIds, currentUser] }
-        });
-
-        res.status(200).json({ users });
-    } catch (error) {
-        console.log("Error in finding the users", error);
-        res.status(500).json({ message: "Error in finding the users" });
-    }
-});
+app.get("/all_users/:userId", (req, res) => {
+    const loggedInUserId = req.params.userId;
+  
+    UserModel.find({ _id: { $ne: loggedInUserId } })
+      .then((users) => {
+        res.status(200).json(users);
+      })
+      .catch((err) => {
+        console.log("Error retrieving users", err);
+        res.status(500).json({ message: "Error retrieving users" });
+      });
+  });
 
 // app.get('/all_users/:userId',(req, res)=>{
 
@@ -138,11 +146,11 @@ app.post('/friend-request/',async (req, res)=>{
 
     try {
         await UserModel.findByIdAndUpdate(selectedUserId,{
-            $push: {friendRequests : currentUserId}
+            $addToSet: {friendRequests : currentUserId}
         });
 
         await UserModel.findByIdAndUpdate(currentUserId,{
-            $push: {sentFriendRequests : selectedUserId}
+            $addToSet: {sentFriendRequests : selectedUserId}
         });
 
         res.sendStatus(200);
@@ -324,24 +332,27 @@ app.post('/deleteMessages/',async (req, res)=>{
 
 app.get('/friend-requests/sent/:userId',async (req, res)=>{
 
-    const {currentUserId} = req.params;
-
     try {
-        const user = await UserModel.findById(currentUserId).populate("sentFriendRequests","user_name email").lean();
+        const {userId} = req.params;
+        const user = await UserModel.findById(userId).populate("sentFriendRequests","user_name email").lean();
+
+        if (!user) {
+            return res.status(404).json({ message: "User not found" });
+        }
+
         const sentFriendRequests = user.sentFriendRequests;
-        
         res.json(sentFriendRequests);
     } catch (error) {
-        res.sendStatus(500);
+        console.log("error",error);
+        res.status(500).json({ error: "Internal Server" });
     }
 })
 
 app.get('/friends/:userId',async (req, res)=>{
 
-    const {currentUserId} = req.params;
-
     try {
-        UserModel.findById(currentUserId).populate("friends").then((user)=>{
+        const {userId} = req.params;
+        UserModel.findById(userId).populate("friends").then((user)=>{
             if(!user){
                 res.status(404).json({message: "user not found"});
             }
