@@ -33,6 +33,15 @@ const messageSchema = new mongoose.Schema({
       modified_date: {
         type: Date,
         default: Date.now
+      },
+      replyMessage: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "Message",
+        default: null,
+      },
+      starredBy:{
+        type:mongoose.Schema.Types.ObjectId,
+        ref:"User"
       }
 
 });

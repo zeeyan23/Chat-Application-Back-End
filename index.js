@@ -10,6 +10,9 @@ import UserModel from "./model/user.model.js";
 import MessageModel from "./model/message.model.js";
 import multer from "multer";
 import axios from "axios"
+import { Server } from "socket.io";
+import http from "http";
+
 const app = express()
 const port = 3000
 
@@ -36,6 +39,96 @@ app.listen(port,'0.0.0.0',() => {
 app.use("/files", express.static("D:/CHAT APP/Backend/files"));
 app.use(express.json({ limit: '100mb' }));
 app.use(express.urlencoded({ limit: '100mb', extended: true }));
+const server = http.createServer(app); // Create HTTP server
+const io = new Server(server, {
+    cors: {
+        origin: "*", // Allow connections from any origin (configure this for production security)
+    },
+});
+
+io.on("connection", (socket) => {
+    console.log("A user connected:", socket.id);
+
+    socket.on("register", (userId) => {
+        socket.join(userId); // Join a room for the user's ID
+        console.log(`User with ID ${userId} joined room ${userId}`);
+    });
+
+    socket.on("disconnect", () => {
+        console.log("A user disconnected:", socket.id);
+    });
+});
+
+io.on("connection", (socket) => {
+    console.log("A user connected:", socket.id);
+
+    // Listen for friend request events from the client
+    socket.on("sendFriendRequest", async ({ senderId, receiverId }) => {
+        try {
+            // Add the friend request in the database
+            const sender = await UserModel.findById(senderId);
+            const receiver = await UserModel.findById(receiverId);
+
+            if (!sender || !receiver) {
+                socket.emit("error", { message: "Invalid users" });
+                return;
+            }
+
+            sender.sentFriendRequests.push(receiverId);
+            receiver.friendRequests.push(senderId);
+
+            await sender.save();
+            await receiver.save();
+
+            // Emit real-time updates to both users
+            io.to(receiverId).emit("friendRequestReceived", { senderId, senderName: sender.user_name });
+            io.to(senderId).emit("friendRequestSent", { receiverId, receiverName: receiver.user_name });
+
+            console.log(`Friend request sent from ${senderId} to ${receiverId}`);
+        } catch (error) {
+            console.error("Error sending friend request:", error);
+            socket.emit("error", { message: "Internal Server Error" });
+        }
+    });
+
+    // Listen for accept friend request events
+    socket.on("acceptFriendRequest", async ({ senderId, receiverId }) => {
+        try {
+            // Update the database
+            const sender = await UserModel.findById(senderId);
+            const receiver = await UserModel.findById(receiverId);
+
+            if (!sender || !receiver) {
+                socket.emit("error", { message: "Invalid users" });
+                return;
+            }
+
+            // Remove the request from `friendRequests` and add to `friends`
+            receiver.friendRequests = receiver.friendRequests.filter((id) => id.toString() !== senderId);
+            sender.sentFriendRequests = sender.sentFriendRequests.filter((id) => id.toString() !== receiverId);
+
+            sender.friends.push(receiverId);
+            receiver.friends.push(senderId);
+
+            await sender.save();
+            await receiver.save();
+
+            // Emit real-time updates
+            io.to(receiverId).emit("friendRequestAccepted", { senderId, senderName: sender.user_name });
+            io.to(senderId).emit("friendRequestAcceptedByReceiver", { receiverId, receiverName: receiver.user_name });
+
+            console.log(`${receiverId} accepted friend request from ${senderId}`);
+        } catch (error) {
+            console.error("Error accepting friend request:", error);
+            socket.emit("error", { message: "Internal Server Error" });
+        }
+    });
+
+    // Handle disconnect
+    socket.on("disconnect", () => {
+        console.log("User disconnected:", socket.id);
+    });
+});
 
 //API's
 
@@ -237,7 +330,7 @@ const upload = multer ({storage :storage,
 
 app.post('/messages',upload.single("file"),async (req, res)=>{
     try {
-        const {senderId, recepientId, messageType, message, duration, videoName} = req.body;
+        const {senderId, recepientId, messageType, message, duration, videoName, replyMessage} = req.body;
         console.log(req.body)
         const newMessage = new MessageModel({
             senderId,
@@ -245,6 +338,7 @@ app.post('/messages',upload.single("file"),async (req, res)=>{
             messageType,
             message,
             timeStamp:new Date(),
+            replyMessage: replyMessage ? replyMessage : null,
             imageUrl:messageType ==='image' ? req.file?.path : null,
             videoUrl: messageType === 'video' ? req.file?.path.replace(/\\/g, '/') : null,
             duration :messageType === 'video' ? Math.floor(duration / 1000) : null,
@@ -290,7 +384,9 @@ app.get('/get-messages/:senderId/:recepientId',async (req, res)=>{
                 {senderId : senderId, recepientId: recepientId},
                 {senderId : recepientId, recepientId: senderId},
             ]
-        }).populate("senderId", "_id user_name");
+        })
+        .populate("senderId", "_id user_name")
+        .populate("replyMessage");
         res.json({message})
 
     } catch (error) {
@@ -348,6 +444,24 @@ app.get('/friend-requests/sent/:userId',async (req, res)=>{
     }
 })
 
+app.get('/friend-requests/received/:userId',async (req, res)=>{
+
+    try {
+        const {userId} = req.params;
+        const user = await UserModel.findById(userId).populate("friendRequests","user_name email").lean();
+
+        if (!user) {
+            return res.status(404).json({ message: "User not found" });
+        }
+
+        const sentFriendRequestsReceived = user.friendRequests;
+        res.json(sentFriendRequestsReceived);
+    } catch (error) {
+        console.log("error",error);
+        res.status(500).json({ error: "Internal Server" });
+    }
+})
+
 app.get('/friends/:userId',async (req, res)=>{
 
     try {
@@ -364,3 +478,71 @@ app.get('/friends/:userId',async (req, res)=>{
         res.sendStatus(500);
     }
 })
+
+app.post('/messages/forward', async (req, res) => {
+    const { senderId, recipientId, messageIds } = req.body;
+    console.log('Request Body:', { senderId, recipientId, messageIds });
+
+    try {
+      // Validate IDs
+      if (!mongoose.Types.ObjectId.isValid(senderId) || !mongoose.Types.ObjectId.isValid(recipientId)) {
+        return res.status(400).json({ error: 'Invalid senderId or recipientId' });
+      }
+      if (!messageIds || messageIds.length === 0) {
+        return res.status(400).json({ error: 'No messages selected for forwarding' });
+      }
+  
+      // Retrieve original messages
+      const originalMessages = await MessageModel.find({ _id: { $in: messageIds } });
+  
+      if (originalMessages.length === 0) {
+        return res.status(404).json({ error: 'No messages found' });
+      }
+  
+      // Prepare forwarded messages
+      const forwardedMessages = originalMessages.map((msg) => ({
+        senderId,
+        recepientId: recipientId,
+        messageType: msg.messageType,
+        message: msg.message,
+        imageUrl: msg.imageUrl,
+        videoUrl: msg.videoUrl,
+        videoName: msg.videoName,
+        duration: msg.duration,
+        replyMessage: msg.replyMessage,
+      }));
+  
+      // Log the prepared messages
+      console.log('Forwarded Messages:', forwardedMessages);
+  
+      // Save forwarded messages
+      await MessageModel.insertMany(forwardedMessages);
+  
+      res.status(200).json({ message: 'Messages forwarded successfully' });
+    } catch (error) {
+      console.error('Error forwarding messages:', error);
+      res.status(500).json({ error: 'Error forwarding messages' });
+    }
+  });
+  
+  app.patch('/star-messages', async (req, res) => {
+    try {
+        const { messageIds, starredBy } = req.body;
+    
+        // Update all messages with the given IDs and set the starredBy field
+        const updatedMessages = await MessageModel.updateMany(
+          { _id: { $in: messageIds } }, // Match messages with any of the provided message IDs
+          { starredBy }, // Update the starredBy field
+          { new: true } // Return the updated documents
+        );
+    
+        if (updatedMessages.nModified === 0) {
+          return res.status(404).json({ message: 'No messages found to update' });
+        }
+    
+        return res.status(200).json({ message: 'Messages updated successfully' });
+      } catch (error) {
+        console.error('Error updating starred messages:', error);
+        return res.status(500).json({ message: 'Internal server error' });
+      }
+  });
