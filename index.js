@@ -157,7 +157,7 @@ const createToken = (userId) =>{
 // Login user
 app.post('/user_login',(req, res)=>{
     const { email, password, expoPushToken} = req.body;
-    console.log(req.body)
+    
     if(!email || !password){
         return res.status(400).json({message: "Please enter both email and password"})
     }
@@ -331,7 +331,7 @@ const upload = multer ({storage :storage,
 app.post('/messages',upload.single("file"),async (req, res)=>{
     try {
         const {senderId, recepientId, messageType, message, duration, videoName, replyMessage} = req.body;
-        console.log(req.body)
+        
         const newMessage = new MessageModel({
             senderId,
             recepientId,
@@ -379,6 +379,12 @@ app.post('/messages',upload.single("file"),async (req, res)=>{
 app.get('/get-messages/:senderId/:recepientId',async (req, res)=>{
     try {
         const {senderId, recepientId} = req.params;
+        console.log("Received Params:", req.params); // Add this
+        if (!mongoose.isValidObjectId(senderId) || !mongoose.isValidObjectId(recepientId)) {
+            console.error("Invalid ObjectId detected:", { senderId, recepientId });
+            return res.status(400).json({ error: "Invalid senderId or recepientId" });
+        }
+
         const message = await MessageModel.find({
             $or:[
                 {senderId : senderId, recepientId: recepientId},
@@ -412,7 +418,7 @@ app.get('/get-messages/:senderId/:recepientId',async (req, res)=>{
 app.post('/deleteMessages/',async (req, res)=>{
     try {
         const {messages} = req.body;
-        console.log(req.body)
+        
         if(!Array.isArray(messages) || messages.length === 0){
             return res.status(400).json({message: "invalid req body"});
         }
@@ -481,7 +487,7 @@ app.get('/friends/:userId',async (req, res)=>{
 
 app.post('/messages/forward', async (req, res) => {
     const { senderId, recipientId, messageIds } = req.body;
-    console.log('Request Body:', { senderId, recipientId, messageIds });
+    
 
     try {
       // Validate IDs
@@ -546,3 +552,33 @@ app.post('/messages/forward', async (req, res) => {
         return res.status(500).json({ message: 'Internal server error' });
       }
   });
+
+  app.get('/get-starred-messages/:userId', async (req, res) => {
+    try {
+      const userId = req.params.userId;
+  
+      // Find messages where starredBy field matches the userId
+      const starredMessages = await MessageModel.find({ starredBy: userId })
+        .populate('senderId', 'user_name')
+        .populate('starredBy', 'user_name')  // Populate user_name from starredBy
+        .populate('recepientId', 'user_name') // Populate user_name from recepientId
+        .sort({ created_date: -1 });
+  
+      if (starredMessages.length === 0) {
+        return res.status(404).json({
+          success: false,
+          message: "No starred messages found for the user",
+        });
+      }
+  
+      res.status(200).json(starredMessages);
+    } catch (error) {
+      console.error("Error fetching messages:", error);
+      res.status(500).json({
+        success: false,
+        message: "Failed to fetch messages",
+        error: error.message,
+      });
+    }
+  });
+  
