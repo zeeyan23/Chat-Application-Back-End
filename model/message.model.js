@@ -39,10 +39,14 @@ const messageSchema = new mongoose.Schema({
         ref: "Message",
         default: null,
       },
-      starredBy:{
+      starredBy:[{
         type:mongoose.Schema.Types.ObjectId,
         ref:"User"
-      }
+      }],
+      clearedBy:[{
+        type:mongoose.Schema.Types.ObjectId
+      }]
+
 
 });
 

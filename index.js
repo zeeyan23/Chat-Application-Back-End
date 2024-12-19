@@ -379,11 +379,6 @@ app.post('/messages',upload.single("file"),async (req, res)=>{
 app.get('/get-messages/:senderId/:recepientId',async (req, res)=>{
     try {
         const {senderId, recepientId} = req.params;
-        console.log("Received Params:", req.params); // Add this
-        if (!mongoose.isValidObjectId(senderId) || !mongoose.isValidObjectId(recepientId)) {
-            console.error("Invalid ObjectId detected:", { senderId, recepientId });
-            return res.status(400).json({ error: "Invalid senderId or recepientId" });
-        }
 
         const message = await MessageModel.find({
             $or:[
@@ -580,5 +575,72 @@ app.post('/messages/forward', async (req, res) => {
         error: error.message,
       });
     }
+  });
+  
+  app.get('/get-starred-message/:id/:userId/', async (req, res) => {
+    try {
+      const {id, userId} = req.params;
+      const messageExists = await MessageModel.exists({ _id: id,"starredBy": userId });
+      console.log("messageExists",messageExists)
+  
+      if (messageExists) {
+        return res.status(200).json({ exists: true, message: "Message exists in the database." });
+      } else {
+        return res.status(404).json({ exists: false, message: "Message not found." });
+      }
+    } catch (error) {
+      console.error("Error checking message existence:", error);
+      res.status(500).json({ exists: false, error: "Internal server error" });
+    }
+  });
+
+  app.delete('/delete-starred-message/:userId/:id', async (req, res) => {
+    try {
+      const {id, userId} = req.params;
+  
+      const result = await MessageModel.updateOne(
+        { _id: id },
+        { $pull: { starredBy: userId } }
+      );
+  
+      if (result.modifiedCount === 0) {
+        return res.status(404).json({ message: "Message not found or user was not starred." });
+      }
+  
+      res.status(200).json({ message: "Starred message removed successfully." });
+    } catch (error) {
+        console.error("Error removing starred message:", error);
+        res.status(500).json({ message: "Internal server error." });
+    }
+  });
+
+  app.post('/clear-chat', async (req, res) => {
+    try {
+        const {userId, otherUserId} = req.body;
+        // Update all messages between these two users
+        
+        const result = await MessageModel.updateMany(
+          {
+            
+            $or: [
+              { senderId: userId, recepientId: otherUserId },
+              { senderId: otherUserId, recepientId: userId },
+            ],
+          },
+          { $addToSet: { clearedBy: userId } } // Add the userId to the clearedBy array
+        );
+    
+        const updatedMessages = await MessageModel.find({
+            $or: [
+              { senderId: userId, recepientId: otherUserId },
+              { senderId: otherUserId, recepientId: userId }
+            ],
+            clearedBy: { $ne: userId } // Exclude messages cleared by this user
+          });
+          res.status(200).json(updatedMessages);
+      } catch (error) {
+        console.error('Error clearing chat:', error);
+        res.status(500).json({ message: 'Internal server error.' });
+      }
   });
   
