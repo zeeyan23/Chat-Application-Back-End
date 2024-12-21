@@ -22,9 +22,15 @@ const io = new Server(server);
 app.get('/', (req, res) => {
   res.send('Server is running!');
 });
+const connectedUsers = {};
 
 io.on('connection', (socket) => {
   console.log(`User connected: ${socket.id}`);
+
+  socket.on("registerUser", (userId) => {
+    connectedUsers[userId] = socket.id;
+    console.log(`User registered: ${userId}`);
+  });
 
   socket.on('joinRoom', (userId) => {
     socket.join(userId); // User joins a room with their user ID
@@ -148,6 +154,16 @@ app.post('/friend-request/',async (req, res)=>{
             $addToSet: {sentFriendRequests : selectedUserId}
         });
 
+        const sender = await UserModel.findById(currentUserId).select("user_name");
+        const recipientSocketId = connectedUsers[selectedUserId];
+        if (recipientSocketId) {
+            io.to(recipientSocketId).emit("friendRequestReceived", {
+                senderId: currentUserId,
+                senderName: sender.user_name,
+            });
+        }
+
+
         res.sendStatus(200);
     } catch (error) {
         res.sendStatus(500);
@@ -184,6 +200,22 @@ app.post('/accept-friend-request/accept',async (req, res)=>{
 
         await sender.save();
         await recepient.save();
+
+        const senderSocketId = connectedUsers[senderId];
+        const recepientSocketId = connectedUsers[recepientId];
+
+        if (senderSocketId) {
+            io.to(senderSocketId).emit('friendRequestAccepted', {
+                userId: recepientId,
+            });
+        }
+
+        if (recepientSocketId) {
+            io.to(recepientSocketId).emit('friendRequestAccepted', {
+                userId: senderId,
+            });
+        }
+
         
         res.status(200).json({message:"Friend request accepted"})
     } catch (error) {
@@ -538,3 +570,12 @@ app.post('/messages/forward', async (req, res) => {
       }
   });
   
+
+  // app.delete('/api/messages', async (req, res) => {
+  //   try {
+  //     await MessageModel.deleteMany({});
+  //     res.status(200).json({ message: 'All messages have been deleted successfully.' });
+  //   } catch (error) {
+  //     res.status(500).json({ error: 'An error occurred while deleting messages.' });
+  //   }
+  // });
