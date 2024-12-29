@@ -38,6 +38,10 @@ const userSchema = new mongoose.Schema({
         }
 
     ],
+    pinnedChats:[{
+            type:mongoose.Schema.Types.ObjectId,
+            ref:"User"
+    }],
     created_date: {
         type: Date,
         default: Date.now

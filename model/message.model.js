@@ -15,13 +15,15 @@ const messageSchema = new mongoose.Schema({
     },
     messageType:{
         type: String,
-        enum:["text", "image", "video", "audio"]
+        enum:["text", "image", "video", "audio","pdf", "docx", "pptx", "xlsx", "zip"]
     },
     message:String,
     imageUrl:String,
     videoUrl: String, 
     videoName: String,
     duration: Number,
+    documentUrl:String,
+    fileName: String,
     timeStamp:{
         type: Date,
         default: Date.now
