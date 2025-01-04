@@ -17,6 +17,17 @@ const messageSchema = new mongoose.Schema({
         type: String,
         enum:["text", "image", "video", "audio","pdf", "docx", "pptx", "xlsx", "zip"]
     },
+    isGroupChat:Boolean,
+    groupId:{
+        
+      type:mongoose.Schema.Types.ObjectId,
+      ref:"User"
+      
+    },
+    imageViewOnce:Boolean,
+    imageViewed:Boolean,
+    videoViewOnce:Boolean,
+    videoViewed:Boolean,
     message:String,
     imageUrl:String,
     videoUrl: String, 

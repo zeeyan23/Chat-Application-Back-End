@@ -17,6 +17,12 @@ const userSchema = new mongoose.Schema({
     image:{
         type:String
     },
+    groups: [
+        {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: "Group"  // Reference to the Group model
+        }
+    ],
     expoPushToken:String,
     friendRequests:[
         {

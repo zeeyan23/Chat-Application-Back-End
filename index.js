@@ -8,6 +8,7 @@ import jsonwebtoken from "jsonwebtoken";
 import dotenv from "dotenv"
 import UserModel from "./model/user.model.js";
 import MessageModel from "./model/message.model.js";
+import GroupModel from "./model/group.model.js";
 import multer from "multer";
 import axios from "axios"
 import { Server } from "socket.io";
@@ -30,15 +31,18 @@ io.on('connection', (socket) => {
 
   socket.on("registerUser", (userId) => {
     connectedUsers[userId] = socket.id;
-    console.log(`User registered: ${userId}`);
   });
 
   // Listening for message events
   socket.on("send_message", (data) => {
-    console.log("Message received:", data);
-
-    // Emit the message to the intended recipient
-    io.to(data.receiverId).emit("receive_message", data);
+    if(data.isGroupChat){
+      console.log("if part")
+      io.to(data.groupId).emit("receive_message", data);
+    }else{
+      console.log("if part")
+      io.to(data.receiverId).emit("receive_message", data);
+    }
+    
 
     // Optionally, broadcast to everyone for testing
     socket.broadcast.emit("update_chat", data);
@@ -95,7 +99,6 @@ app.post('/create_user',(req, res)=>{
     user.save().then(()=>{
         res.status(200).json({ message: "User Account Created"})
     }).catch((err)=>{
-        console.log("Failed to register the User", err);
         res.status(500).json({message:"Error registering your account"})
     })
 })
@@ -276,11 +279,14 @@ app.get('/has-friends/:userId',async (req, res)=>{
 app.get('/get-all-friends/:userId',async (req, res)=>{
     try {
         const {userId} = req.params;
-        const users = await UserModel.findById(userId).populate("friends","user_name email").populate("pinnedChats", "_id").lean()       
+        const users = await UserModel.findById(userId).populate("friends","user_name email")
+          .populate("groups","groupName groupMembers").populate("pinnedChats", "_id").lean()       
 
+        console.log(users.groups)
         res.json({
           friends: users.friends,
           pinnedChats: users.pinnedChats,
+          groups: users.groups
       });
 
     } catch (error) {
@@ -315,14 +321,20 @@ const upload = multer ({storage :storage,
 
 app.post('/messages',upload.single("file"),async (req, res)=>{
     try {
-        const {senderId, recepientId, messageType, message, duration, videoName, replyMessage, fileName} = req.body;
-        console.log(req.body)
+        const {senderId, recepientId, messageType, message, duration, videoName, replyMessage, fileName, 
+          imageViewOnce,videoViewOnce, groupId, isGroupChat} = req.body;
+
+        const actualRecepientId = isGroupChat ? groupId : recepientId;
+        console.log("actualRecepientId",actualRecepientId)
         const newMessage = new MessageModel({
             senderId,
-            recepientId,
+            recepientId : actualRecepientId,
             messageType,
             message,
             timeStamp:new Date(),
+            imageViewOnce,
+            videoViewOnce,
+            isGroupChat,
             replyMessage: replyMessage ? replyMessage : null,
             imageUrl:messageType ==='image' ? req.file?.path : null,
             videoUrl: messageType === 'video' ? req.file?.path.replace(/\\/g, '/') : null,
@@ -332,34 +344,35 @@ app.post('/messages',upload.single("file"),async (req, res)=>{
             videoName : messageType === 'video' ? videoName : null
         })
         const savedMessage = await newMessage.save();
-
-        //const messageData = await MessageModel.findById(newMessage._id).populate("senderId", "_id user_name");  
-        const messageData = await MessageModel.findById(savedMessage._id).populate("senderId", "_id user_name");
-        io.to(recepientId).emit("newMessage", messageData);
-
-        console.log(`Emitting message to recipient ${recepientId}`);  
         
+        const messageData = await MessageModel.findById(savedMessage._id).populate("senderId", "_id user_name");
+        io.to(isGroupChat ? groupId : recepientId).emit("newMessage", messageData);
+        
+        if(!isGroupChat){
+          const recipient = await UserModel.findById(recepientId);
+          if (!recipient || !recipient.expoPushToken) {
+              return res.status(404).json({ message: "Recipient not found or push token missing." });
+          }
 
-        const recipient = await UserModel.findById(recepientId);
-        if (!recipient || !recipient.expoPushToken) {
-            return res.status(404).json({ message: "Recipient not found or push token missing." });
+          const sender = await UserModel.findById(senderId);
+          const userName = sender.user_name;
+          const notificationData = {
+              to: recipient.expoPushToken, 
+              sound: 'default',
+              title: `${messageType} Message from ${sender.user_name}`,
+              body: messageType === 'text' ? message : `You received a ${messageType}.`,
+              data: { senderId, recepientId, messageType, userName},
+          };
+
+          await axios.post('https://exp.host/--/api/v2/push/send', notificationData, {
+              headers: {
+                  'Content-Type': 'application/json',
+              },
+          });
+
         }
-        const sender = await UserModel.findById(senderId);
-        const userName = sender.user_name;
-        const notificationData = {
-            to: recipient.expoPushToken, 
-            sound: 'default',
-            title: `${messageType} Message from ${sender.user_name}`,
-            body: messageType === 'text' ? message : `You received a ${messageType}.`,
-            data: { senderId, recepientId, messageType, userName},
-        };
-
-        await axios.post('https://exp.host/--/api/v2/push/send', notificationData, {
-            headers: {
-                'Content-Type': 'application/json',
-            },
-        });
-
+        
+        
         res.status(200).json({message:"Message sent successfully and notification delivered."})
 
     } catch (error) {
@@ -368,11 +381,50 @@ app.post('/messages',upload.single("file"),async (req, res)=>{
     }
 })
 
+app.patch('/viewedImageOnce/true', async (req,res)=>{
+  try {
+    const {imageViewed,id } = req.body;
+
+    const updatedMessages = await MessageModel.findByIdAndUpdate(
+    id,
+    { $set: { imageViewed } },
+    { new: true } // Ensures the updated document is returned
+    ).populate('senderId', '_id').populate('recepientId'); // Populate fields
+
+    io.to(updatedMessages.senderId._id.toString()).emit('imageViewedUpdate', updatedMessages);
+    io.to(updatedMessages.recepientId._id.toString()).emit('imageViewedUpdate', updatedMessages);
+
+    return res.status(200).json(updatedMessages);
+  } catch (error) {
+    console.error('Error updating starred messages:', error);
+    return res.status(500).json({ message: 'Internal server error' });
+  }
+})
+
+app.patch('/viewedVideoOnce/true', async (req,res)=>{
+  try {
+    const {videoViewed,id } = req.body;
+
+    const updatedMessages = await MessageModel.findByIdAndUpdate(
+    id,
+    { $set: { videoViewed } },
+    { new: true } // Ensures the updated document is returned
+    ).populate('senderId', '_id').populate('recepientId'); // Populate fields
+
+    io.to(updatedMessages.senderId._id.toString()).emit('videoViewedUpdate', updatedMessages);
+    io.to(updatedMessages.recepientId._id.toString()).emit('videoViewedUpdate', updatedMessages);
+
+    return res.status(200).json(updatedMessages);
+  } catch (error) {
+    console.error('Error updating starred messages:', error);
+    return res.status(500).json({ message: 'Internal server error' });
+  }
+})
+
 //fetch messages
 app.get('/get-messages/:senderId/:recepientId',async (req, res)=>{
     try {
         const {senderId, recepientId} = req.params;
-        console.log(`Fetching messages between ${senderId} and ${recepientId}`);
         const message = await MessageModel.find({
             $or:[
                 {senderId : senderId, recepientId: recepientId},
@@ -388,6 +440,41 @@ app.get('/get-messages/:senderId/:recepientId',async (req, res)=>{
         res.sendStatus(500);
     }
 })
+
+app.get("/get-group-messages/:groupId", async (req, res) => {
+  try {
+    const { groupId } = req.params;
+    const messages = await MessageModel.find({
+      recepientId: groupId, // Only filter by groupId (recepientId)
+    }).populate("senderId", "_id user_name").populate("replyMessage");;
+    res.status(200).json({ message: messages });
+  } catch (error) {
+    console.log("Error:", error);
+    res.status(500).json({ error: "Failed to fetch group messages" });
+  }
+});
+
+app.get("/get-groupInfo/:groupId", async (req, res) => {
+  try {
+    const { groupId } = req.params;
+
+    const groupInfo = await GroupModel.findById(groupId)
+      .populate("groupMembers", "user_name email") // Populate specific fields
+      .populate("groupAdmin", "user_name email");
+
+      console.log(groupInfo)
+    if (!groupInfo) {
+      return res.status(404).json({ error: "Group not found" });
+    }
+
+    res.status(200).json(groupInfo);
+
+  } catch (error) {
+    console.log("Error:", error);
+    res.status(500).json({ error: "Failed to fetch group messages" });
+  }
+});
+
 
 // app.get('/user/:userId',async (req, res)=>{
 //     try {
@@ -564,7 +651,7 @@ app.post('/messages/forward', async (req, res) => {
     try {
       const {id, userId} = req.params;
       const messageExists = await MessageModel.exists({ _id: id,"starredBy": userId });
-      console.log("messageExists",messageExists)
+      
   
       if (messageExists) {
         return res.status(200).json({ exists: true, message: "Message exists in the database." });
@@ -638,7 +725,6 @@ app.post('/messages/forward', async (req, res) => {
   //pinning chat
   app.patch("/updatePinnedChats", async (req, res) => {
     const { userId, pinnedChats } = req.body;
-    console.log(req.body)
     if (!userId || !Array.isArray(pinnedChats)) {
       return res.status(400).json({ message: "Invalid request data" });
     }
@@ -651,7 +737,6 @@ app.post('/messages/forward', async (req, res) => {
         { new: true }
       );
 
-      console.log(updatedUser)
       if (!updatedUser) {
         return res.status(404).json({ message: "User not found" });
       }
@@ -692,7 +777,6 @@ app.post('/messages/forward', async (req, res) => {
   app.delete('/unPinChats/:id/:userId', async (req, res) => {
     try {
       const {id, userId} = req.params;
-      console.log(id, userId)
       const result = await UserModel.updateMany(
         { _id: userId },
         { $pull: { pinnedChats: id } }
@@ -714,6 +798,42 @@ app.post('/messages/forward', async (req, res) => {
     }
   });
   
+
+  app.patch('/creategroup/:userId', async (req, res) => {
+    try {
+        const userId = req.params.userId;
+        const { groupName, groupMembers, groupIcon } = req.body;
+        const user = await UserModel.findById(userId);
+
+        if (!user) {
+            return res.status(404).json({ message: "User not found." });
+        }
+
+        const createdGroup = new GroupModel({
+            groupName,
+            groupMembers,
+            groupIcon,
+            groupAdmin: user._id,
+        });
+        await createdGroup.save();
+
+        const allMembers = [...groupMembers, userId]
+        await UserModel.updateMany(
+            { _id: { $in: allMembers } },
+            { $push: { groups: createdGroup._id } }
+        );
+
+        res.status(200).json({
+            message: "Group created successfully.",
+            group: createdGroup,
+        });
+    } catch (error) {
+        console.error("Error creating group:", error);
+        res.status(500).json({ message: "Internal server error." });
+    }
+});
+  
+
 
 //   app.delete('/accept-friend-request/remove', async (req, res) => {
 //     try {
@@ -738,21 +858,27 @@ app.post('/messages/forward', async (req, res) => {
 
 // app.delete('/friend-request/remove', async (req, res) => {
 //   try {
-//       const userId = new ObjectId("676688039c120a4cba2c52dc");
-//       const friendIdToRemove = new ObjectId("676687f69c120a4cba2c52da");
+//       const userId = new ObjectId("6766789c9c01a2601d81bc57");
+//       const friendIdsToRemove = [
+//           new ObjectId("6777ee083fa34e323f416baa"),
+//           new ObjectId("6777ecf73fa34e323f416b2f"),
+//           new ObjectId("6777ebe63fa34e323f416a95"),
+//           new ObjectId("6777ea733fa34e323f4169f5")
+//       ]; // Replace with your array of friend IDs
 
 //       const result = await UserModel.updateOne(
 //           { _id: userId },
-//           { $pull: { friends: friendIdToRemove } }
+//           { $pull: { groups: { $in: friendIdsToRemove } } } // Use $in to match any of the IDs in the array
 //       );
 
 //       if (result.modifiedCount > 0) {
-//           res.status(200).json({ message: "Friend removed successfully" });
+//           res.status(200).json({ message: "Friends removed successfully" });
 //       } else {
-//           res.status(404).json({ message: "Friend not found or already removed" });
+//           res.status(404).json({ message: "No friends found or already removed" });
 //       }
 //   } catch (error) {
-//       console.error("Error removing friend:", error.message, error.stack);
+//       console.error("Error removing friends:", error.message, error.stack);
 //       res.status(500).json({ message: "Internal Server Error", error: error.message });
 //   }
 // });
+
