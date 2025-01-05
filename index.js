@@ -15,8 +15,7 @@ import { Server } from "socket.io";
 import http from "http";
 import { createServer } from 'node:http';
 import { ObjectId } from 'mongodb';
-
-
+import path from "path"
 
 const app = express()
 const server = createServer(app);
@@ -323,7 +322,7 @@ app.post('/messages',upload.single("file"),async (req, res)=>{
     try {
         const {senderId, recepientId, messageType, message, duration, videoName, replyMessage, fileName, 
           imageViewOnce,videoViewOnce, groupId, isGroupChat} = req.body;
-
+          console.log(req.file.path)
         const actualRecepientId = isGroupChat ? groupId : recepientId;
         console.log("actualRecepientId",actualRecepientId)
         const newMessage = new MessageModel({
@@ -834,7 +833,83 @@ app.post('/messages/forward', async (req, res) => {
 });
   
 
+app.get("/user-data/:userId", async(req, res) => {
+  const loggedInUserId = req.params.userId;
 
+  try {
+    // Fetch user data from the database
+    const user = await UserModel.findById(loggedInUserId).select("user_name email image");
+
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    // Send the user data as the response
+    res.status(200).json(user);
+  } catch (error) {
+    console.error("Error fetching user data:", error);
+    res.status(500).json({ message: "Internal Server Error" });
+  }
+});
+
+app.patch("/users/update", async (req, res) => {
+  const { userId, user_name, email } = req.body;
+
+  try {
+    // Find user by ID and update the specified fields
+    const updateFields = {};
+    if (user_name) updateFields.user_name = user_name;
+    if (email) updateFields.email = email;
+
+    const updatedUser = await UserModel.findByIdAndUpdate(
+      userId,
+      { $set: updateFields },
+      { new: true } // Return the updated document
+    );
+
+    if (!updatedUser) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    res.status(200).json({
+      message: "User updated successfully",
+      data: updatedUser,
+    });
+  } catch (error) {
+    console.error("Error updating user:", error);
+    res.status(500).json({ message: "Internal Server Error", error });
+  }
+});
+
+app.patch('/update-userdata/:userId', upload.single('file'), async (req, res) => {
+  try {
+      const userId = req.params.userId;
+      const filePath = req.file?.path;
+
+      console.log(userId,filePath)
+      if (!filePath) {
+          return res.status(400).json({ message: 'No file uploaded' });
+      }
+
+      const updatedUser = await UserModel.findByIdAndUpdate(userId, {
+          image: filePath,  
+      }, { new: true });
+
+      const savedMessage = await updatedUser.save();
+      if (!updatedUser) {
+          return res.status(404).json({ message: 'User not found' });
+      }
+
+      // Send a response with the updated user data
+      res.status(200).json({
+          message: 'User data updated successfully',
+          user: updatedUser
+      });
+  } catch (error) {
+      console.error('Error updating user data:', error);
+      res.status(500).json({ message: 'Server error', error: error.message });
+  }
+});
 //   app.delete('/accept-friend-request/remove', async (req, res) => {
 //     try {
 //         const userId = new ObjectId("676687f69c120a4cba2c52da");
