@@ -4,7 +4,7 @@ const groupSchema = new mongoose.Schema({
     groupName:{
         type: String,
     },
-    groupIcon:{
+    image:{
         type: String,
     },
     groupMembers:[
