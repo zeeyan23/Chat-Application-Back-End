@@ -32,6 +32,7 @@ const messageSchema = new mongoose.Schema({
     imageUrl:String,
     videoUrl: String, 
     videoName: String,
+    audioUrl: String,
     duration: Number,
     documentUrl:String,
     fileName: String,

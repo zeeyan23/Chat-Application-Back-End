@@ -32,7 +32,6 @@ io.on('connection', (socket) => {
     connectedUsers[userId] = socket.id;
   });
 
-  // Listening for message events
   socket.on("send_message", (data) => {
     if(data.isGroupChat){
       console.log("if part")
@@ -41,16 +40,11 @@ io.on('connection', (socket) => {
       console.log("if part")
       io.to(data.receiverId).emit("receive_message", data);
     }
-    
-
-    // Optionally, broadcast to everyone for testing
     socket.broadcast.emit("update_chat", data);
   });
 
-
-  
   socket.on('joinRoom', (userId) => {
-    socket.join(userId); // User joins a room with their user ID
+    socket.join(userId); 
   });
 
   socket.on('disconnect', () => {
@@ -133,7 +127,6 @@ app.post('/user_login',(req, res)=>{
             user.save();
         }
 
-
         const token= createToken(user.id);
         res.status(200).json({token, userId: user.id})
     }).catch((error)=> {
@@ -158,8 +151,6 @@ app.get('/get-user-id-from-token', async (req, res) => {
       res.status(500).json({ message: "Error decoding token" });
   }
 });
-
-
 
 app.get("/all_users/:userId", (req, res) => {
     const loggedInUserId = req.params.userId;
@@ -196,7 +187,6 @@ app.post('/friend-request/',async (req, res)=>{
                 senderName: sender.user_name,
             });
         }
-
 
         res.sendStatus(200);
     } catch (error) {
@@ -249,8 +239,6 @@ app.post('/accept-friend-request/accept',async (req, res)=>{
                 userId: senderId,
             });
         }
-
-        
         res.status(200).json({message:"Friend request accepted"})
     } catch (error) {
         res.sendStatus(500);
@@ -306,7 +294,7 @@ const storage = multer.diskStorage({
 // const upload = multer ({storage :storage});
 const upload = multer ({storage :storage,
     fileFilter: (req, file, cb) => {
-        const fileTypes = /jpeg|jpg|png|mp4|mov|pdf|docx|pptx|xlsx|zip/; 
+        const fileTypes = /jpeg|jpg|png|mp4|mov|pdf|docx|pptx|xlsx|zip|m4a|mp3|wav|3gp/; 
         const extName = fileTypes.test(file.mimetype);
         if (extName) {
             cb(null, true);
@@ -321,6 +309,7 @@ app.post('/messages',upload.single("file"),async (req, res)=>{
     try {
         const {senderId, recepientId, messageType, message, duration, videoName, replyMessage, fileName, 
           imageViewOnce,videoViewOnce, groupId, isGroupChat} = req.body;
+          console.log(req.body)
         const actualRecepientId = isGroupChat ? groupId : recepientId;
         const newMessage = new MessageModel({
             senderId,
@@ -334,10 +323,11 @@ app.post('/messages',upload.single("file"),async (req, res)=>{
             replyMessage: replyMessage ? replyMessage : null,
             imageUrl:messageType ==='image' ? req.file?.path : null,
             videoUrl: messageType === 'video' ? req.file?.path.replace(/\\/g, '/') : null,
-            duration :messageType === 'video' ? Math.floor(duration / 1000) : null,
+            duration :messageType === 'video' || messageType === 'audio' ? Math.floor(duration / 1000) : null,
             documentUrl: ['pdf', 'docx', 'pptx', 'xlsx', 'zip'].includes(messageType) ? req.file?.path.replace(/\\/g, '/') : null,
             fileName: ['pdf', 'docx', 'pptx', 'xlsx', 'zip'].includes(messageType) ? fileName :null,
-            videoName : messageType === 'video' ? videoName : null
+            videoName : messageType === 'video' ? videoName : null,
+            audioUrl: messageType === 'audio' ? req.file?.path.replace(/\\/g, '/') : null,
         })
         const savedMessage = await newMessage.save();
         
@@ -367,7 +357,6 @@ app.post('/messages',upload.single("file"),async (req, res)=>{
           });
 
         }
-        
         
         res.status(200).json({message:"Message sent successfully and notification delivered."})
 
@@ -469,20 +458,6 @@ app.get("/get-groupInfo/:groupId", async (req, res) => {
   }
 });
 
-
-// app.get('/user/:userId',async (req, res)=>{
-//     try {
-//         const {userId} = req.params;
-//         const recepientId = await UserModel.findById(userId) 
-//         res.json(recepientId);
-
-//     } catch (error) {
-//         console.log(error)
-//         res.sendStatus(500);
-//     }
-// })
-
-
 //delete messages
 app.post('/deleteMessages/',async (req, res)=>{
     try {
@@ -579,6 +554,7 @@ app.post('/messages/forward', async (req, res) => {
         message: msg.message,
         imageUrl: msg.imageUrl,
         videoUrl: msg.videoUrl,
+        audioUrl: msg.audioUrl,
         videoName: msg.videoName,
         duration: msg.duration,
         replyMessage: msg.replyMessage,
