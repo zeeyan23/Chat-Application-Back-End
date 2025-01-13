@@ -33,11 +33,12 @@ io.on('connection', (socket) => {
   });
 
   socket.on("send_message", (data) => {
+    console.log(data)
     if(data.isGroupChat){
-      console.log("if part")
+      console.log("Group chat");
       io.to(data.groupId).emit("receive_message", data);
     }else{
-      console.log("if part")
+      console.log("One-to-one chat");
       io.to(data.receiverId).emit("receive_message", data);
     }
     socket.broadcast.emit("update_chat", data);
@@ -330,9 +331,9 @@ app.post('/messages',upload.single("file"),async (req, res)=>{
             audioUrl: messageType === 'audio' ? req.file?.path.replace(/\\/g, '/') : null,
         })
         const savedMessage = await newMessage.save();
-        
+        console.log("actualRecepientId", actualRecepientId)
         const messageData = await MessageModel.findById(savedMessage._id).populate("senderId", "_id user_name");
-        io.to(isGroupChat ? groupId : recepientId).emit("newMessage", messageData);
+        io.to(actualRecepientId).emit("newMessage", messageData);
         
         if(!isGroupChat){
           const recipient = await UserModel.findById(recepientId);
@@ -417,7 +418,13 @@ app.get('/get-messages/:senderId/:recepientId',async (req, res)=>{
             ]
         })
         .populate("senderId", "_id user_name image")
-        .populate("replyMessage");
+        .populate({
+          path: "replyMessage", // Populate replyMessage
+          populate: {
+              path: "senderId", // Nested population for senderId inside replyMessage
+              select: "_id user_name image" // Select only necessary fields
+          }
+        });
         res.json({message})
 
     } catch (error) {
