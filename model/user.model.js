@@ -33,9 +33,17 @@ const userSchema = new mongoose.Schema({
     ],
     friends:[
         {
-            type:mongoose.Schema.Types.ObjectId,
-            ref:"User"
-        }
+        friendsList:[
+            {
+                type: mongoose.Schema.Types.ObjectId,
+                ref: "User"
+            }
+        ],
+        deletedChats: [
+            {
+              type: mongoose.Schema.Types.ObjectId,
+            }
+          ]}
     ],
     sentFriendRequests:[
         {
