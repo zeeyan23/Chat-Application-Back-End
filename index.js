@@ -279,7 +279,7 @@ app.get('/get-all-friends/:userId',async (req, res)=>{
         const {userId} = req.params;
         const users = await UserModel.findById(userId).populate("friends.friendsList","user_name email image")
           .populate("groups","groupName groupMembers image").populate("pinnedChats", "_id").lean()       
-
+        console.log(JSON.stringify(users, null, 2))
         res.json({
           friends: users.friends,
           pinnedChats: users.pinnedChats,
@@ -353,7 +353,7 @@ app.post('/messages',upload.single("file"),async (req, res)=>{
           }
 
           const sender = await UserModel.findById(senderId);
-          const userName = sender.user_name;
+          const userName = sender.user_name
           const notificationData = {
               to: recipient.expoPushToken, 
               sound: 'default',
@@ -751,6 +751,7 @@ app.post('/messages/forward', async (req, res) => {
 
   app.patch("/deleteChat", async (req, res) => {
     const { userId, chatsTobeDeleted } = req.body;
+    console.log(chatsTobeDeleted)
     if (!userId || !Array.isArray(chatsTobeDeleted)) {
       return res.status(400).json({ message: "Invalid request data" });
     }
@@ -769,8 +770,24 @@ app.post('/messages/forward', async (req, res) => {
           ...chatsTobeDeleted,
         ];
       });
-
-      // Save the updated user document
+      const result = await MessageModel.updateMany(
+        {
+          $or: [
+            { senderId: userId, recepientId: { $in: chatsTobeDeleted } },
+            { senderId: { $in: chatsTobeDeleted }, recepientId: userId },
+          ],
+        },
+        { $addToSet: { clearedBy: userId } }
+      );
+      
+      // Find messages that were not cleared by `userId`
+      const updatedMessages = await MessageModel.find({
+        $or: [
+          { senderId: userId, recepientId: { $in: chatsTobeDeleted } },
+          { senderId: { $in: chatsTobeDeleted }, recepientId: userId },
+        ],
+        clearedBy: { $ne: userId },
+      });
       await user.save();
       res.status(200).json({ message: "Chats successfully marked as deleted" });
     } catch (error) {
@@ -782,6 +799,7 @@ app.post('/messages/forward', async (req, res) => {
   //pinning chat
   app.patch("/updatePinnedChats", async (req, res) => {
     const { userId, pinnedChats } = req.body;
+    console.log(req.body)
     if (!userId || !Array.isArray(pinnedChats)) {
       return res.status(400).json({ message: "Invalid request data" });
     }
@@ -995,6 +1013,24 @@ app.patch('/update-groupData/:userId', upload.single('file'), async (req, res) =
   }
 });
 
+app.delete('/remove_chat_from_deleted_chat', async (req, res) => { 
+  try {
+    const {userId, chatsTobeRemovedFromDeletedChat} = req.body;
+    const result = await UserModel.updateOne(
+      { _id: userId, "friends.deletedChats": chatsTobeRemovedFromDeletedChat }, 
+      { $pull: { "friends.$.deletedChats": chatsTobeRemovedFromDeletedChat } } 
+    );
+
+      if (result.modifiedCount > 0) {
+          res.status(200).json({ message: "Friends removed successfully" });
+      } else {
+          res.status(404).json({ message: "No friends found or already removed" });
+      }
+  } catch (error) {
+      console.error("Error removing friends:", error.message, error.stack);
+      res.status(500).json({ message: "Internal Server Error", error: error.message });
+  }
+});
 
 //   app.delete('/accept-friend-request/remove', async (req, res) => {
 //     try {
@@ -1043,41 +1079,18 @@ app.patch('/update-groupData/:userId', upload.single('file'), async (req, res) =
 //   }
 // });
 
-app.delete('/remove', async (req, res) => { 
-  try {
-      const userId = new ObjectId("6791d1ed867a3a58475bd949");
-      const friendIdsToRemove = [
-          new ObjectId("6791d39c867a3a58475bd964")
-      ]; // Replace with your array of friend IDs
+// app.delete('/delete-all-messages', async (req, res) => {
+//   try {
+//       // Delete all messages
+//       const result = await MessageModel.deleteMany({});
 
-      const result = await UserModel.updateOne(
-          { _id: userId },
-          { $pull: { "friends.$[].deletedChats": { $in: friendIdsToRemove } } } // Correct syntax for nested array
-      );
-
-      if (result.modifiedCount > 0) {
-          res.status(200).json({ message: "Friends removed successfully" });
-      } else {
-          res.status(404).json({ message: "No friends found or already removed" });
-      }
-  } catch (error) {
-      console.error("Error removing friends:", error.message, error.stack);
-      res.status(500).json({ message: "Internal Server Error", error: error.message });
-  }
-});
-
-app.delete('/delete-all-messages', async (req, res) => {
-  try {
-      // Delete all messages
-      const result = await MessageModel.deleteMany({});
-
-      // Respond with the number of deleted documents
-      return res.status(200).json({
-          success: true,
-          message: `${result.deletedCount} messages deleted successfully`,
-      });
-  } catch (error) {
-      console.error("Error deleting all messages:", error);
-      res.status(500).json({ success: false, message: "Internal server error" });
-  }
-});
+//       // Respond with the number of deleted documents
+//       return res.status(200).json({
+//           success: true,
+//           message: `${result.deletedCount} messages deleted successfully`,
+//       });
+//   } catch (error) {
+//       console.error("Error deleting all messages:", error);
+//       res.status(500).json({ success: false, message: "Internal server error" });
+//   }
+// });
