@@ -54,7 +54,8 @@ const userSchema = new mongoose.Schema({
     ],
     pinnedChats:[{
             type:mongoose.Schema.Types.ObjectId,
-            ref:"User"
+            // ref:"User"
+            refModel: { type: String, required: true, enum: ['Chat', 'Group'] }
     }],
     created_date: {
         type: Date,
