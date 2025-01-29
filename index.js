@@ -328,6 +328,7 @@ const storage = multer.diskStorage({
 })
 // const upload = multer ({storage :storage});
 const upload = multer ({storage :storage,
+    limits: { fileSize: 100 * 1024 * 1024 }, 
     fileFilter: (req, file, cb) => {
         const fileTypes = /jpeg|jpg|png|mp4|mov|pdf|docx|pptx|xlsx|zip|m4a|mp3|wav|3gp/; 
         const extName = fileTypes.test(file.mimetype);
@@ -340,7 +341,16 @@ const upload = multer ({storage :storage,
 });
 
 
-app.post('/messages',upload.single("file"),async (req, res)=>{
+app.post('/messages',(req, res, next) => {
+    upload.single("file")(req, res, (err) => {
+        if (err instanceof multer.MulterError && err.code === "LIMIT_FILE_SIZE") {
+            return res.status(400).json({ error: "Max file size is 100MB." });
+        } else if (err) {
+            return res.status(400).json({ error: err.message });
+        }
+        next();
+    });
+  },async (req, res)=>{
   
     try {
         const {senderId, recepientId, messageType, message, duration, videoName, replyMessage, fileName, 
