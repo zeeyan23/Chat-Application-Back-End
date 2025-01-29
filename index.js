@@ -107,34 +107,58 @@ const createToken = (userId) =>{
     return token;
 }
 // Login user
-app.post('/user_login',(req, res)=>{
-    const { email, password, expoPushToken} = req.body;
-    
-    if(!email || !password){
-        return res.status(400).json({message: "Please enter both email and password"})
-    }
+app.post('/user_login', async (req, res) => {
+  const { email, password, expoPushToken } = req.body;
 
-    UserModel.findOne({email}).then((user)=>{
-        if(!user){
-            return res.status(404).json({message: "User Not Found"})
-        }
+  if (!email || !password) {
+      return res.status(400).json({ message: "Please enter both email and password" });
+  }
 
-        if(user.password !== password){
-            return res.status(401).json({message: "Invalid Password"})
-        }
+  try {
+      // Normalize the email: trim spaces and convert to lowercase
+      const normalizedEmail = email.trim().toLowerCase();
 
-        if (expoPushToken) {
-            user.expoPushToken = expoPushToken;
-            user.save();
-        }
+      // Find user by normalized email
+      const user = await UserModel.findOne({ email: normalizedEmail });
 
-        const token= createToken(user.id);
-        res.status(200).json({token, userId: user.id})
-    }).catch((error)=> {
-        console.log("Error in finding the user", error);
-        res.status(500).json({message: "Error in finding the user"})
-    })
-})
+      if (!user) {
+          return res.status(404).json({ message: "User Not Found" });
+      }
+
+      if (user.password !== password) {
+          return res.status(401).json({ message: "Invalid Password" });
+      }
+
+      // Update expoPushToken if provided
+      if (expoPushToken) {
+          user.expoPushToken = expoPushToken;
+          await user.save();
+      }
+
+      // Create token
+      const token = createToken(user.id);
+
+      const friendsList = user.friends?.[0]?.friendsList || [];
+      const validFriends = await UserModel.find({ _id: { $in: friendsList } }).select('_id');
+      const hasValidFriends = validFriends.length > 0;
+
+      // Check groups array for valid group IDs
+      const validGroups = await GroupModel.find({ _id: { $in: user.groups } }).select('_id');
+      const hasValidGroups = validGroups.length > 0;
+
+      // Include checks in response
+      res.status(200).json({
+          token,
+          userId: user.id,
+          hasValidFriends,
+          hasValidGroups,
+      });
+  } catch (error) {
+      console.error("Error in finding the user or validating data", error);
+      res.status(500).json({ message: "Error in finding the user or validating data" });
+  }
+});
+
 
 app.get('/get-user-id-from-token', async (req, res) => {
   try {
@@ -914,7 +938,7 @@ app.get("/user-data/:userId", async(req, res) => {
 
   try {
     // Fetch user data from the database
-    const user = await UserModel.findById(loggedInUserId).select("user_name email image");
+    const user = await UserModel.findById(loggedInUserId).select("user_name email password image");
 
     if (!user) {
       return res.status(404).json({ message: "User not found" });
@@ -929,13 +953,14 @@ app.get("/user-data/:userId", async(req, res) => {
 });
 
 app.patch("/users/update", async (req, res) => {
-  const { userId, user_name, email } = req.body;
+  const { userId, user_name, email,password } = req.body;
 
   try {
     // Find user by ID and update the specified fields
     const updateFields = {};
     if (user_name) updateFields.user_name = user_name;
     if (email) updateFields.email = email;
+    if (password) updateFields.password = password;
 
     const updatedUser = await UserModel.findByIdAndUpdate(
       userId,
@@ -954,6 +979,27 @@ app.patch("/users/update", async (req, res) => {
   } catch (error) {
     console.error("Error updating user:", error);
     res.status(500).json({ message: "Internal Server Error", error });
+  }
+});
+
+app.patch('/update_password' ,async(req, res)=>{
+  try {
+    const { email, password } = req.body;
+
+    const user = await UserModel.findOne({ email: email.toLowerCase() });
+
+    if (!user) {
+        return res.status(404).json({ message: "User not found." });
+    }
+
+    //const hashedPassword = await bcrypt.hash(password, 10);
+
+    await UserModel.updateOne({ email: email.toLowerCase() }, { $set: { password: password } });
+
+    res.status(200).json({ message: "Password updated successfully." });
+  } catch (error) {
+    console.error("Error updating password:", error);
+    res.status(500).json({ message: "Internal server error." });
   }
 });
 
