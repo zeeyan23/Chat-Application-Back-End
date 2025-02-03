@@ -25,20 +25,18 @@ app.get('/', (req, res) => {
   res.send('Server is running!');
 });
 const connectedUsers = {};
+let users = {};
 
 io.on('connection', (socket) => {
-
+  console.log("A user connected:", socket.id);
   socket.on("registerUser", (userId) => {
     connectedUsers[userId] = socket.id;
   });
 
   socket.on("send_message", (data) => {
-    console.log(data)
     if(data.isGroupChat){
-      console.log("Group chat");
       io.to(data.groupId).emit("receive_message", data);
     }else{
-      console.log("One-to-one chat");
       io.to(data.receiverId).emit("receive_message", data);
     }
     socket.broadcast.emit("update_chat", data);
@@ -48,7 +46,38 @@ io.on('connection', (socket) => {
     socket.join(userId); 
   });
 
-  socket.on('disconnect', () => {
+  socket.on("user_online", async ({ userId, recipientId }) => {
+    // Store the socket ID for both users
+    users[userId] = socket.id;
+    users[recipientId] = socket.id;  // Store recipient's socket ID as well
+
+    // Update the database for online status
+    await UserModel.findByIdAndUpdate(userId, { isOnline: true });
+    await UserModel.findByIdAndUpdate(recipientId, { isOnline: true });
+
+    // Emit the status update to both users
+    io.emit("update_user_status", { userId, isOnline: true });
+    io.emit("update_user_status", { recipientId, isOnline: true });
+  });
+
+  socket.on("user_offline", async ({ userId, recipientId }) => {
+      // Remove the user from the online list
+      delete users[userId];
+      delete users[recipientId];
+
+      // Update the database for offline status
+      await UserModel.findByIdAndUpdate(userId, { isOnline: false, lastOnlineTime: new Date() });
+      await UserModel.findByIdAndUpdate(recipientId, { isOnline: false, lastOnlineTime: new Date() });
+
+      // Emit the status update to both users
+      io.emit("update_user_status", { userId, isOnline: false });
+      io.emit("update_user_status", { recipientId, isOnline: false });
+  });
+
+
+
+  // Handle user disconnecting (update last seen)
+  socket.on("disconnect", async () => {
     console.log(`User disconnected: ${socket.id}`);
   });
 });
@@ -301,9 +330,9 @@ app.get('/has-friends/:userId',async (req, res)=>{
 app.get('/get-all-friends/:userId',async (req, res)=>{
     try {
         const {userId} = req.params;
-        const users = await UserModel.findById(userId).populate("friends.friendsList","user_name email image")
+        const users = await UserModel.findById(userId).populate("friends.friendsList","user_name email image isOnline lastOnlineTime")
           .populate("groups","groupName groupMembers image").populate("pinnedChats", "_id").lean()       
-        console.log(JSON.stringify(users, null, 2))
+        
         res.json({
           friends: users.friends,
           pinnedChats: users.pinnedChats,
@@ -355,7 +384,7 @@ app.post('/messages',(req, res, next) => {
     try {
         const {senderId, recepientId, messageType, message, duration, videoName, replyMessage, fileName, 
           imageViewOnce,videoViewOnce, groupId, isGroupChat} = req.body;
-        console.log("message recieved in BE", req.body)
+        
         const actualRecepientId = isGroupChat ? groupId : recepientId;
         const newMessage = new MessageModel({
             senderId,
@@ -376,7 +405,7 @@ app.post('/messages',(req, res, next) => {
             audioUrl: messageType === 'audio' ? req.file?.path.replace(/\\/g, '/') : null,
         })
         const savedMessage = await newMessage.save();
-        console.log("actualRecepientId", actualRecepientId)
+        
         const messageData = await MessageModel.findById(savedMessage._id).populate("senderId", "_id user_name");
         io.to(actualRecepientId).emit("newMessage", messageData);
         
@@ -409,20 +438,20 @@ app.post('/messages',(req, res, next) => {
           });
       
           if (!groupDetails) {
-            console.log("Group Not found");
+            
             return;
           }
           const expoPushTokens = groupDetails.groupMembers.map(member => member.expoPushToken);
 
           const groupAdmin = await UserModel.findById(groupDetails.groupAdmin);
-          console.log("groupAdmin",groupAdmin)
+          
           if (groupAdmin && groupAdmin.expoPushToken) {
             expoPushTokens.push(groupAdmin.expoPushToken);
           }
           const sender = await UserModel.findById(senderId);
           const userName = sender.user_name;
           for (const token of expoPushTokens) {
-            console.log("Iterating for", token)
+            
             const notificationData = {
               to: token, // Sending to each expoPushToken
               sound: 'default',
@@ -438,7 +467,7 @@ app.post('/messages',(req, res, next) => {
               },
             });
       
-            console.log(`Notification sent to ${token}`);
+            
           }
       
         }
@@ -530,18 +559,23 @@ app.get("/get-group-messages/:groupId", async (req, res) => {
   }
 });
 
-app.get("/get-groupInfo/:groupId", async (req, res) => {
+app.get("/get_chat_info/:id", async (req, res) => {
   try {
-    const { groupId } = req.params;
-
-    const groupInfo = await GroupModel.findById(groupId)
+    const { id } = req.params;
+    
+    let userInfo = await GroupModel.findById(id)
       .populate("groupMembers", "user_name email image")
       .populate("groupAdmin", "user_name email image");
-    if (!groupInfo) {
-      return res.status(404).json({ error: "Group not found" });
-    }
 
-    res.status(200).json(groupInfo);
+      if (!userInfo) {
+        userInfo = await UserModel.findById(id).select("user_name email image");
+      }
+
+      if (!userInfo) {
+        return res.status(404).json({ error: "User or group not found" });
+      }
+  
+      res.status(200).json(userInfo);
 
   } catch (error) {
     console.log("Error:", error);
@@ -785,7 +819,7 @@ app.post('/messages/forward', async (req, res) => {
 
   app.patch("/deleteChat", async (req, res) => {
     const { userId, chatsTobeDeleted } = req.body;
-    console.log(chatsTobeDeleted)
+    
     if (!userId || !Array.isArray(chatsTobeDeleted)) {
       return res.status(400).json({ message: "Invalid request data" });
     }
@@ -833,7 +867,7 @@ app.post('/messages/forward', async (req, res) => {
   //pinning chat
   app.patch("/updatePinnedChats", async (req, res) => {
     const { userId, pinnedChats } = req.body;
-    console.log(req.body)
+    
     if (!userId || !Array.isArray(pinnedChats)) {
       return res.status(400).json({ message: "Invalid request data" });
     }

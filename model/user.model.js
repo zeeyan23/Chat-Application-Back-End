@@ -57,6 +57,10 @@ const userSchema = new mongoose.Schema({
             // ref:"User"
             refModel: { type: String, required: true, enum: ['Chat', 'Group'] }
     }],
+    isOnline:Boolean,
+    lastOnlineTime:{
+        type: Date,
+    },
     created_date: {
         type: Date,
         default: Date.now
