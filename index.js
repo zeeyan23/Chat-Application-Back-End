@@ -46,39 +46,40 @@ io.on('connection', (socket) => {
     socket.join(userId); 
   });
 
-  socket.on("user_online", async ({ userId, recipientId }) => {
-    // Store the socket ID for both users
-    users[userId] = socket.id;
-    users[recipientId] = socket.id;  // Store recipient's socket ID as well
+  socket.on("user_online", async ({ userId }) => {
+    users[userId] = socket.id; // Store only the user's socket ID
 
-    // Update the database for online status
+    // Update database
     await UserModel.findByIdAndUpdate(userId, { isOnline: true });
-    await UserModel.findByIdAndUpdate(recipientId, { isOnline: true });
 
-    // Emit the status update to both users
+    // Notify other users about the status update
     io.emit("update_user_status", { userId, isOnline: true });
-    io.emit("update_user_status", { recipientId, isOnline: true });
   });
 
-  socket.on("user_offline", async ({ userId, recipientId }) => {
-      // Remove the user from the online list
-      delete users[userId];
-      delete users[recipientId];
+  socket.on("user_offline", async ({ userId }) => {
+    const lastOnlineTime = new Date();
+    delete users[userId]; // Remove user from the online list
 
-      // Update the database for offline status
-      await UserModel.findByIdAndUpdate(userId, { isOnline: false, lastOnlineTime: new Date() });
-      await UserModel.findByIdAndUpdate(recipientId, { isOnline: false, lastOnlineTime: new Date() });
+    // Update database
+    await UserModel.findByIdAndUpdate(userId, { isOnline: false, lastOnlineTime: new Date() });
 
-      // Emit the status update to both users
-      io.emit("update_user_status", { userId, isOnline: false });
-      io.emit("update_user_status", { recipientId, isOnline: false });
+    // Notify other users about the status update
+    io.emit("update_user_status", { userId, isOnline: false, lastOnlineTime });
   });
 
 
 
   // Handle user disconnecting (update last seen)
-  socket.on("disconnect", async () => {
+  socket.on("disconnect", async ({ userId }) => {
     console.log(`User disconnected: ${socket.id}`);
+    const lastOnlineTime = new Date();
+    delete users[userId]; // Remove user from the online list
+
+    // Update database
+    await UserModel.findByIdAndUpdate(userId, { isOnline: false, lastOnlineTime: new Date() });
+
+    // Notify other users about the status update
+    io.emit("update_user_status", { userId, isOnline: false, lastOnlineTime });
   });
 });
 
@@ -125,6 +126,26 @@ app.post('/create_user',(req, res)=>{
         res.status(500).json({message:"Error registering your account"})
     })
 })
+
+app.get("/user/status/:recipientId", async (req, res) => {
+  try {
+      const { recipientId } = req.params;
+      const user = await UserModel.findById(recipientId, "isOnline lastOnlineTime");
+
+      if (!user) {
+          return res.status(404).json({ message: "User not found" });
+      }
+
+      res.json({
+          isOnline: user.isOnline,
+          lastOnlineTime: user.lastOnlineTime,
+      });
+  } catch (error) {
+      console.error("Error fetching user status:", error);
+      res.status(500).json({ message: "Internal server error" });
+  }
+});
+
 
 const createToken = (userId) =>{
     const payload={
@@ -599,6 +620,26 @@ app.post('/deleteMessages/',async (req, res)=>{
         console.log(error)
         res.sendStatus(500);
     }
+})
+
+app.post('/deleteForMeMessages/',async (req, res)=>{
+  try {
+    const { messages, userId } = req.body;
+
+    if (!Array.isArray(messages) || messages.length === 0) {
+      return res.status(400).json({ message: "Invalid request body" });
+    }
+
+    await MessageModel.updateMany(
+      { _id: { $in: messages } },
+      { $addToSet: { clearedBy: userId } } // Add userId to clearedBy array
+    );
+
+    res.json({ message: "Messages marked as deleted for user" });
+  } catch (error) {
+    console.error(error);
+    res.sendStatus(500);
+  }
 })
 
 app.get('/friend-requests/sent/:userId',async (req, res)=>{
