@@ -26,11 +26,16 @@ app.get('/', (req, res) => {
 });
 const connectedUsers = {};
 let users = {};
+const online_users={};
 
 io.on('connection', (socket) => {
-  console.log("A user connected:", socket.id);
   socket.on("registerUser", (userId) => {
     connectedUsers[userId] = socket.id;
+  });
+
+  socket.on("online_user", (userId) => {
+    console.log(`✅ Registered ${userId} with socket ID: ${socket.id}`);
+    online_users[userId] = socket.id;
   });
 
   socket.on("send_message", (data) => {
@@ -47,39 +52,67 @@ io.on('connection', (socket) => {
   });
 
   socket.on("user_online", async ({ userId }) => {
-    users[userId] = socket.id; // Store only the user's socket ID
-
-    // Update database
+    users[userId] = socket.id; 
     await UserModel.findByIdAndUpdate(userId, { isOnline: true });
-
-    // Notify other users about the status update
     io.emit("update_user_status", { userId, isOnline: true });
   });
 
   socket.on("user_offline", async ({ userId }) => {
     const lastOnlineTime = new Date();
-    delete users[userId]; // Remove user from the online list
-
-    // Update database
+    delete users[userId];
     await UserModel.findByIdAndUpdate(userId, { isOnline: false, lastOnlineTime: new Date() });
-
-    // Notify other users about the status update
     io.emit("update_user_status", { userId, isOnline: false, lastOnlineTime });
   });
 
 
+  socket.on("call-user", ({ from, to, channelName }) => {
+    console.log(`calling from ${from} to ${to} ${channelName}`)
+    if (connectedUsers[to]) {
+      console.log("user",connectedUsers[to])
+        io.to(connectedUsers[to]).emit("incoming-call", { from, channelName });
+    }
+  });
 
-  // Handle user disconnecting (update last seen)
+  socket.on("accept-call", ({ from, to, channelName }) => {
+    console.log("channel name", channelName)
+    if (connectedUsers[from]) {
+        io.to(connectedUsers[from]).emit("call-accepted", { channelName });
+
+        // Notify the receiver to join the call
+        io.to(connectedUsers[to]).emit("join-call", { channelName });
+    }
+  });
+
+
+  socket.on("decline-call", ({ from, to }) => {
+    console.log(`from ${from} to ${to}`)
+      if (connectedUsers[from, to]) {
+          io.to(connectedUsers[from, to]).emit("call-declined");
+      }
+  });
+
+
+  socket.on("video_calling", (data) => {
+    io.emit("incoming_video_call", data);
+  });
+
+  socket.on("video_call_accepted", (data) => {
+    io.emit("video_call_approved", { channelId: data.callerId });
+  });
+
+  socket.on("decline_video_call", (data) => {
+    io.emit("video_call_declined", data);
+  });
+
+  
+
   socket.on("disconnect", async ({ userId }) => {
     console.log(`User disconnected: ${socket.id}`);
     const lastOnlineTime = new Date();
-    delete users[userId]; // Remove user from the online list
-
-    // Update database
+    delete users[userId]; 
     await UserModel.findByIdAndUpdate(userId, { isOnline: false, lastOnlineTime: new Date() });
-
-    // Notify other users about the status update
     io.emit("update_user_status", { userId, isOnline: false, lastOnlineTime });
+
   });
 });
 
@@ -103,7 +136,7 @@ try{
     console.log("Error connection", err);
 }
 
-app.use("/files", express.static("D:/CHAT APP/Backend/files"));
+app.use("/files", express.static(path.resolve("D:/CHAT APP/Backend/files")));
 app.use(express.json({ limit: '100mb' }));
 app.use(express.urlencoded({ limit: '100mb', extended: true }));
  // Create HTTP server
