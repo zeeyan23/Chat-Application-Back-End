@@ -29,42 +29,52 @@ let users = {};
 const online_users={};
 
 io.on('connection', (socket) => {
-  socket.on("registerUser", (userId) => {
+  
+  socket.on("join", (userId) => {
+    socket.join(userId);
     connectedUsers[userId] = socket.id;
   });
 
-  socket.on("online_user", (userId) => {
-    console.log(`✅ Registered ${userId} with socket ID: ${socket.id}`);
-    online_users[userId] = socket.id;
-  });
+  // socket.on("sendMessage", ({ recipientId, message }) => {
+  //   io.to(recipientId).emit("newMessage", message);
+  // });
+  // socket.on("registerUser", (userId) => {
+  //   connectedUsers[userId] = socket.id;
+  // });
 
-  socket.on("send_message", (data) => {
-    if(data.isGroupChat){
-      io.to(data.groupId).emit("receive_message", data);
-    }else{
-      io.to(data.receiverId).emit("receive_message", data);
-    }
-    socket.broadcast.emit("update_chat", data);
-  });
+  // socket.on("online_user", (userId) => {
+  //   console.log(`✅ Registered ${userId} with socket ID: ${socket.id}`);
+  //   online_users[userId] = socket.id;
+  // });
 
-  socket.on('joinRoom', (userId) => {
-    socket.join(userId); 
-  });
+  // socket.on("send_message", (data) => {
+  //   if(data.isGroupChat){
+  //     io.to(data.groupId).emit("receive_message", data);
+  //   }else{
+  //     io.to(data.receiverId).emit("receive_message", data);
+  //   }
+  //   socket.broadcast.emit("update_chat", data);
+  // });
 
-  socket.on("user_online", async ({ userId }) => {
-    users[userId] = socket.id; 
-    await UserModel.findByIdAndUpdate(userId, { isOnline: true });
-    io.emit("update_user_status", { userId, isOnline: true });
-  });
+  // socket.on('joinRoom', (userId) => {
+  //   socket.join(userId); 
+  // });
 
-  socket.on("user_offline", async ({ userId }) => {
-    const lastOnlineTime = new Date();
-    delete users[userId];
-    await UserModel.findByIdAndUpdate(userId, { isOnline: false, lastOnlineTime: new Date() });
-    io.emit("update_user_status", { userId, isOnline: false, lastOnlineTime });
-  });
+  // socket.on("user_online", async ({ userId }) => {
+  //   users[userId] = socket.id; 
+  //   await UserModel.findByIdAndUpdate(userId, { isOnline: true });
+  //   io.emit("update_user_status", { userId, isOnline: true });
+  // });
+
+  // socket.on("user_offline", async ({ userId }) => {
+  //   const lastOnlineTime = new Date();
+  //   delete users[userId];
+  //   await UserModel.findByIdAndUpdate(userId, { isOnline: false, lastOnlineTime: new Date() });
+  //   io.emit("update_user_status", { userId, isOnline: false, lastOnlineTime });
+  // });
 
 
+  //voice call
   socket.on("call-user", ({ from, to, channelName }) => {
     console.log(`calling from ${from} to ${to} ${channelName}`)
     if (connectedUsers[to]) {
@@ -83,7 +93,6 @@ io.on('connection', (socket) => {
     }
   });
 
-
   socket.on("decline-call", ({ from, to }) => {
     console.log(`from ${from} to ${to}`)
       if (connectedUsers[from, to]) {
@@ -91,7 +100,7 @@ io.on('connection', (socket) => {
       }
   });
 
-
+  //video call
   socket.on("video_calling", (data) => {
     io.emit("incoming_video_call", data);
   });
@@ -107,11 +116,11 @@ io.on('connection', (socket) => {
   
 
   socket.on("disconnect", async ({ userId }) => {
-    console.log(`User disconnected: ${socket.id}`);
-    const lastOnlineTime = new Date();
-    delete users[userId]; 
-    await UserModel.findByIdAndUpdate(userId, { isOnline: false, lastOnlineTime: new Date() });
-    io.emit("update_user_status", { userId, isOnline: false, lastOnlineTime });
+    // console.log(`User disconnected: ${socket.id}`);
+    // const lastOnlineTime = new Date();
+    // delete users[userId]; 
+    // await UserModel.findByIdAndUpdate(userId, { isOnline: false, lastOnlineTime: new Date() });
+    // io.emit("update_user_status", { userId, isOnline: false, lastOnlineTime });
 
   });
 });
@@ -460,7 +469,14 @@ app.post('/messages',(req, res, next) => {
         })
         const savedMessage = await newMessage.save();
         
-        const messageData = await MessageModel.findById(savedMessage._id).populate("senderId", "_id user_name");
+        const messageData = await MessageModel.findById(savedMessage._id).populate("senderId", "_id user_name").populate({
+          path: "replyMessage",
+          populate: {
+              path: "senderId",
+              select: "_id user_name"
+          }
+        });
+        console.log("in case of audio message", actualRecepientId)
         io.to(actualRecepientId).emit("newMessage", messageData);
         
         if(!isGroupChat){
@@ -543,6 +559,8 @@ app.patch('/viewedImageOnce/true', async (req,res)=>{
     { $set: { imageViewed } },
     { new: true } // Ensures the updated document is returned
     ).populate('senderId', '_id').populate('recepientId'); // Populate fields
+
+    console.log(JSON.stringify(updatedMessages, null, 2))
 
     io.to(updatedMessages.senderId._id.toString()).emit('imageViewedUpdate', updatedMessages);
     io.to(updatedMessages.recepientId._id.toString()).emit('imageViewedUpdate', updatedMessages);
@@ -640,13 +658,20 @@ app.get("/get_chat_info/:id", async (req, res) => {
 //delete messages
 app.post('/deleteMessages/',async (req, res)=>{
     try {
-        const {messages} = req.body;
+        const {messages, userId,recipentId} = req.body;
         
         if(!Array.isArray(messages) || messages.length === 0){
             return res.status(400).json({message: "invalid req body"});
         }
-        await MessageModel.deleteMany({_id:{$in: messages}})       
+        const objectIds = messages.map(id => new mongoose.Types.ObjectId(id));
 
+        await MessageModel.deleteMany({_id:{$in: objectIds}})       
+
+        const messageIds = messages.map((msg) => msg.toString());
+
+        // Emit to each user's room individually
+        io.to(userId).emit('messages_deleted_for_both', { messageIds });
+        io.to(recipentId).emit('messages_deleted_for_both', { messageIds });
         res.json({messages : "Message deleted successfully"})
 
     } catch (error) {
@@ -657,16 +682,20 @@ app.post('/deleteMessages/',async (req, res)=>{
 
 app.post('/deleteForMeMessages/',async (req, res)=>{
   try {
-    const { messages, userId } = req.body;
+    const { messages, userId, recepientId } = req.body;
 
     if (!Array.isArray(messages) || messages.length === 0) {
       return res.status(400).json({ message: "Invalid request body" });
     }
 
+    const objectIds = messages.map(id => new mongoose.Types.ObjectId(id));
+
     await MessageModel.updateMany(
-      { _id: { $in: messages } },
-      { $addToSet: { clearedBy: userId } } // Add userId to clearedBy array
+      { _id: { $in: objectIds } },
+      { $addToSet: { clearedBy: userId } }
     );
+
+    io.to(userId).emit('messages_deleted_for_me',{messages});
 
     res.json({ message: "Messages marked as deleted for user" });
   } catch (error) {
@@ -730,17 +759,12 @@ app.get('/friends/:userId',async (req, res)=>{
 
 app.post('/messages/forward', async (req, res) => {
     const { senderId, recipientId, messageIds } = req.body;
-    
+    console.log(senderId, recipientId, messageIds)
 
     try {
       // Validate IDs
-      if (!mongoose.Types.ObjectId.isValid(senderId) || !mongoose.Types.ObjectId.isValid(recipientId)) {
-        return res.status(400).json({ error: 'Invalid senderId or recipientId' });
-      }
-      if (!messageIds || messageIds.length === 0) {
-        return res.status(400).json({ error: 'No messages selected for forwarding' });
-      }
-      const originalMessages = await MessageModel.find({ _id: { $in: messageIds } });
+      const validMessageIds = messageIds.map(item => new mongoose.Types.ObjectId(item.messageId));
+      const originalMessages = await MessageModel.find({ _id: { $in: validMessageIds } });
   
       if (originalMessages.length === 0) {
         return res.status(404).json({ error: 'No messages found' });
@@ -772,9 +796,11 @@ app.post('/messages/forward', async (req, res) => {
     try {
         const { messageIds, starredBy } = req.body;
 
+        const messageIdList = messageIds.map((item) => item.messageId);
+
         const updatedMessages = await MessageModel.updateMany(
-          { _id: { $in: messageIds } },
-          { starredBy }, 
+          { _id: { $in: messageIdList } },
+          { $addToSet: { starredBy } },
           { new: true }  
         );
     
@@ -836,7 +862,7 @@ app.post('/messages/forward', async (req, res) => {
   app.delete('/delete-starred-message/:userId/:id', async (req, res) => {
     try {
       const {id, userId} = req.params;
-  
+
       const result = await MessageModel.updateOne(
         { _id: id },
         { $pull: { starredBy: userId } }
