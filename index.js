@@ -75,29 +75,35 @@ io.on('connection', (socket) => {
 
 
   //voice call
-  socket.on("call-user", ({ from, to, channelName }) => {
-    console.log(`calling from ${from} to ${to} ${channelName}`)
-    if (connectedUsers[to]) {
-      console.log("user",connectedUsers[to])
-        io.to(connectedUsers[to]).emit("incoming-call", { from, channelName });
-    }
+  // socket.on("call-user", async({ from, to, channelName, isGroupCall }) => {
+  //   if(isGroupCall){
+  //     const groupDetails = await GroupModel.findById(to).populate('groupMembers', '_id');
+  //     // Emit to each group member's room (userId)
+  //     groupDetails.groupMembers.forEach((member) => {
+  //       const memberId = member._id.toString();
+  //       if (memberId !== from) {
+  //         io.to(memberId).emit("incoming-call", { from, channelName,isGroupCall });
+  //       }
+  //     });
+  //   }else{
+  //     if (connectedUsers[to]) {
+  //       io.to(connectedUsers[to]).emit("incoming-call", { from, channelName, isGroupCall });
+  //     }
+  //   }
+  // });
+
+
+  //voice call
+  socket.on("voice_calling", (data) => {
+    io.emit("incoming_voice_call", data);
   });
 
-  socket.on("accept-call", ({ from, to, channelName }) => {
-    console.log("channel name", channelName)
-    if (connectedUsers[from]) {
-        io.to(connectedUsers[from]).emit("call-accepted", { channelName });
-
-        // Notify the receiver to join the call
-        io.to(connectedUsers[to]).emit("join-call", { channelName });
-    }
+  socket.on("voice_call_accepted", (data) => {
+    io.emit("voice_call_approved", { channelId: data.callerId });
   });
 
-  socket.on("decline-call", ({ from, to }) => {
-    console.log(`from ${from} to ${to}`)
-      if (connectedUsers[from, to]) {
-          io.to(connectedUsers[from, to]).emit("call-declined");
-      }
+  socket.on("decline_voice_call", (data) => {
+    io.emit("voice_call_declined", data);
   });
 
   //video call
