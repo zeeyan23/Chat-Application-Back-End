@@ -29,8 +29,8 @@ let users = {};
 const online_users={};
 
 io.on('connection', (socket) => {
-  
-  socket.on("join", (userId) => {
+  console.log("user connected", socket.id)
+  socket.on("join", async(userId) => {
     socket.join(userId);
     connectedUsers[userId] = socket.id;
   });
@@ -47,14 +47,14 @@ io.on('connection', (socket) => {
   //   online_users[userId] = socket.id;
   // });
 
-  // socket.on("send_message", (data) => {
-  //   if(data.isGroupChat){
-  //     io.to(data.groupId).emit("receive_message", data);
-  //   }else{
-  //     io.to(data.receiverId).emit("receive_message", data);
-  //   }
-  //   socket.broadcast.emit("update_chat", data);
-  // });
+  socket.on("send_message", (data) => {
+    if(data.isGroupChat){
+      io.to(data.groupId).emit("receive_message", data);
+    }else{
+      io.to(data.receiverId).emit("receive_message", data);
+    }
+    socket.broadcast.emit("update_chat", data);
+  });
 
   // socket.on('joinRoom', (userId) => {
   //   socket.join(userId); 
@@ -115,13 +115,8 @@ io.on('connection', (socket) => {
 
   
 
-  socket.on("disconnect", async ({ userId }) => {
-    // console.log(`User disconnected: ${socket.id}`);
-    // const lastOnlineTime = new Date();
-    // delete users[userId]; 
-    // await UserModel.findByIdAndUpdate(userId, { isOnline: false, lastOnlineTime: new Date() });
-    // io.emit("update_user_status", { userId, isOnline: false, lastOnlineTime });
-
+  socket.on("disconnect", async(reason) => {
+    console.log("User disconnected:", socket.id, "Reason:", reason);
   });
 });
 
@@ -169,24 +164,24 @@ app.post('/create_user',(req, res)=>{
     })
 })
 
-app.get("/user/status/:recipientId", async (req, res) => {
-  try {
-      const { recipientId } = req.params;
-      const user = await UserModel.findById(recipientId, "isOnline lastOnlineTime");
+// app.get("/user/status/:recipientId", async (req, res) => {
+//   try {
+//       const { recipientId } = req.params;
+//       const user = await UserModel.findById(recipientId, "isOnline lastOnlineTime");
 
-      if (!user) {
-          return res.status(404).json({ message: "User not found" });
-      }
+//       if (!user) {
+//           return res.status(404).json({ message: "User not found" });
+//       }
 
-      res.json({
-          isOnline: user.isOnline,
-          lastOnlineTime: user.lastOnlineTime,
-      });
-  } catch (error) {
-      console.error("Error fetching user status:", error);
-      res.status(500).json({ message: "Internal server error" });
-  }
-});
+//       res.json({
+//           isOnline: user.isOnline,
+//           lastOnlineTime: user.lastOnlineTime,
+//       });
+//   } catch (error) {
+//       console.error("Error fetching user status:", error);
+//       res.status(500).json({ message: "Internal server error" });
+//   }
+// });
 
 
 const createToken = (userId) =>{
@@ -476,8 +471,29 @@ app.post('/messages',(req, res, next) => {
               select: "_id user_name"
           }
         });
-        console.log("in case of audio message", actualRecepientId)
-        io.to(actualRecepientId).emit("newMessage", messageData);
+
+        if(isGroupChat){
+          const groupDetails = await GroupModel.findById(actualRecepientId).populate('groupMembers', '_id');
+  
+          if (!groupDetails) return console.error("❌ Group not found!");
+  
+          console.log("📤 Emitting group message to members:", groupDetails.groupMembers.map(m => m._id.toString()));
+
+  
+          // Emit to each group member's room (userId)
+          groupDetails.groupMembers.forEach((member) => {
+            const memberId = member._id.toString(); // Convert ObjectId to a string
+            if (memberId !== senderId) {
+              io.to(memberId).emit("newMessage", messageData);
+            }
+          });
+          
+        }else{
+          console.log("📤 Emitting group message to", actualRecepientId);
+          io.to(actualRecepientId).emit("newMessage", messageData);
+        }
+      
+        
         
         if(!isGroupChat){
           const recipient = await UserModel.findById(recepientId);
