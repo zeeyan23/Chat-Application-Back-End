@@ -94,17 +94,39 @@ io.on('connection', (socket) => {
 
 
   //voice call
-  socket.on("voice_calling", (data) => {
-    io.emit("incoming_voice_call", data);
+  socket.on("voice_calling", async(data) => {
+    const callerInfo = await UserModel.findById(data.callerId).select("user_name image");
+    const calleeInfo = await UserModel.findById(data.calleeId).select("user_name image");
+    io.emit("incoming_voice_call", {
+      callerId: data.callerId,
+      calleeId: data.calleeId,
+      isCaller: data.isCaller,
+      callerInfo,
+      calleeInfo
+    });
   });
 
-  socket.on("voice_call_accepted", (data) => {
-    io.emit("voice_call_approved", { channelId: data.callerId });
+  socket.on("voice_call_accepted",async (data) => {
+    const calleeInfo = await UserModel.findById(data.calleeId).select("user_name image");
+    const callerInfo = await UserModel.findById(data.callerId).select("user_name image");
+    io.emit("voice_call_approved", {
+      callerId: data.callerId,
+      calleeId: data.calleeId,
+      isCaller: true,
+      calleeInfo,
+      callerInfo
+    });
   });
 
   socket.on("decline_voice_call", (data) => {
     io.emit("voice_call_declined", data);
   });
+
+  socket.on("leave_voice_call", (data) => {
+    io.to(data.calleeId).emit("call_ended", { message: "User has left the call" });
+    io.to(data.callerId).emit("call_ended", { message: "User has left the call" });
+  });
+
 
   socket.on("group_voice_calling", async (data) => {
     try {
