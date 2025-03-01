@@ -95,9 +95,10 @@ io.on('connection', (socket) => {
 
   //voice call
   socket.on("voice_calling", async(data) => {
+    console.log(data)
     const callerInfo = await UserModel.findById(data.callerId).select("user_name image");
     const calleeInfo = await UserModel.findById(data.calleeId).select("user_name image");
-    io.emit("incoming_voice_call", {
+    io.to(data.calleeId).emit("incoming_voice_call", {
       callerId: data.callerId,
       calleeId: data.calleeId,
       isCaller: data.isCaller,
