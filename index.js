@@ -98,12 +98,36 @@ io.on('connection', (socket) => {
     console.log(data)
     const callerInfo = await UserModel.findById(data.callerId).select("user_name image");
     const calleeInfo = await UserModel.findById(data.calleeId).select("user_name image");
+
+    const callee = await UserModel.findById(data.calleeId);
+    const pushToken = callee.expoPushToken;
+    
+    const message = {
+      to: pushToken,
+      sound: "default",
+      title: "Incoming Call",
+      body: `${callerInfo.user_name} is calling you!`,
+      data: {
+        callerId: callerInfo._id,
+        callerName: callerInfo.user_name,
+      },
+    };
+
+    await axios.post('https://exp.host/--/api/v2/push/send', message, {
+      headers: {
+          'Content-Type': 'application/json',
+      },
+    });
+
+
     io.to(data.calleeId).emit("incoming_voice_call", {
       callerId: data.callerId,
       calleeId: data.calleeId,
       isCaller: data.isCaller,
       callerInfo,
-      calleeInfo
+      calleeInfo,
+      isCaller: false,
+      isGroup: false,
     });
   });
 
