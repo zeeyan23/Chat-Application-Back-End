@@ -292,8 +292,40 @@ io.on('connection', (socket) => {
 
 
   //video call
-  socket.on("video_calling", (data) => {
-    io.emit("incoming_video_call", data);
+  socket.on("video_calling", async(data) => {
+    const callerInfo = await UserModel.findById(data.callerId).select("user_name image");
+    const calleeInfo = await UserModel.findById(data.calleeId).select("user_name image");
+
+    const callee = await UserModel.findById(data.calleeId);
+    const pushToken = callee.expoPushToken;
+    
+    const message = {
+      to: pushToken,
+      sound: "default",
+      title: "Incoming Call",
+      body: `${callerInfo.user_name} is calling you!`,
+      data: {
+        callerId: callerInfo._id,
+        callerName: callerInfo.user_name,
+      },
+    };
+
+    await axios.post('https://exp.host/--/api/v2/push/send', message, {
+      headers: {
+          'Content-Type': 'application/json',
+      },
+    });
+
+
+    io.to(data.calleeId).emit("incoming_video_call", {
+      callerId: data.callerId,
+      calleeId: data.calleeId,
+      isCaller: data.isCaller,
+      callerInfo,
+      calleeInfo,
+      isCaller: false,
+      isGroup: false,
+    });
   });
 
   socket.on("video_call_accepted", (data) => {
@@ -304,7 +336,10 @@ io.on('connection', (socket) => {
     io.emit("video_call_declined", data);
   });
 
-  
+  socket.on("leave_video_call", (data) => {
+    io.to(data.calleeId).emit("video_call_ended", { message: "User has left the call" });
+    io.to(data.callerId).emit("video_call_ended", { message: "User has left the call" });
+  });
 
   socket.on("disconnect", async(reason) => {
     console.log("User disconnected:", socket.id, "Reason:", reason);
