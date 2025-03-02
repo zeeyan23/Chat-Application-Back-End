@@ -185,7 +185,37 @@ io.on('connection', (socket) => {
     }
   });
   
+  socket.on("group_video_calling", async (data) => {
+    try {
+      const groupDetails = await GroupModel.findById(data.groupId).select("groupMembers groupAdmin").exec();
   
+      const callerInfo = await UserModel.findById(data.callerId).select("user_name image");
+      let participants = groupDetails.groupMembers.map((id) => id.toString());
+
+      // Ensure groupAdmin is included if missing
+      const groupAdminId = groupDetails.groupAdmin.toString();
+      if (!participants.includes(groupAdminId)) {
+        participants.push(groupAdminId);
+      }
+
+      participants.forEach((memberId) => {
+        memberId = memberId.toString();
+        
+        if (memberId !== data.callerId) {
+          io.to(memberId).emit("incoming_group_video_call", {
+            groupId: data.groupId,
+            participants: participants,
+            callerId: data.callerId,
+            callerName: callerInfo.user_name,
+            callerImage: callerInfo.image,
+          });
+        }
+      });
+  
+    } catch (error) {
+      console.error("Error handling group voice call:", error);
+    }
+  });
 
   // socket.on("group_voice_call_accepted", (data) => {
   //   io.to(data.callerId).emit("group_voice_call_approved", {
@@ -244,6 +274,57 @@ io.on('connection', (socket) => {
       console.error("Error in group_voice_call_accepted:", error);
     }
   });
+
+  socket.on("group_video_call_accepted", async (data) => {
+    try {
+      // Fetch group details and members
+      const groupDetails = await GroupModel.findById(data.groupId).populate(
+        "groupMembers",
+        "_id"
+      );
+  
+      const validParticipants = data.participants.filter((id) => id);
+
+      // Fetch participant info (user_name, image)
+      const participantsInfo = await UserModel.find({
+        _id: { $in: validParticipants },
+      }).select("user_name image");
+
+      const participantDetails = participantsInfo.map((user) => ({
+        id: user._id.toString(),
+        userName: user.user_name,
+        userImage: user.image,
+      }));
+
+
+      const allMembers = groupDetails.groupMembers.map((member) => member._id.toString());
+      if (data.callerId && !allMembers.includes(data.callerId)) {
+        allMembers.push(data.callerId);
+      }
+
+      // Notify all group members (including the caller)
+      allMembers.forEach((memberId) => {
+        io.to(memberId).emit("group_video_call_approved", {
+          channelId: data.groupId,          // Agora channel (groupId as channelId)
+          participants: participantDetails, // List of users (id, userName, userImage)
+        });
+      });
+
+  
+      // Track active group calls (optional, useful for managing ongoing calls)
+      if (!global.activeGroupCalls) {
+        global.activeGroupCalls = {};
+      }
+      if (!global.activeGroupCalls[data.groupId]) {
+        global.activeGroupCalls[data.groupId] = [];
+      }
+      global.activeGroupCalls[data.groupId].push(data.userId);
+  
+      console.log(`Group voice call started for group: ${data.groupId}`);
+    } catch (error) {
+      console.error("Error in group_voice_call_accepted:", error);
+    }
+  });
   
 
   socket.on("decline_group_voice_call", async(callerData) => {
@@ -282,6 +363,50 @@ io.on('connection', (socket) => {
         if (memberId.toString() !== callerId.toString()) {
           console.log("Emitting to:", memberId);
           io.to(memberId).emit("group_voice_call_declined", {
+            message: "The caller has declined the call.",
+          });
+        }
+      });
+    }
+    
+  });
+
+  socket.on("decline_group_video_call", async(callerData) => {
+    const { callerId, groupId } = callerData;
+   
+    
+    if(!groupId){
+      console.log("participant declined call")
+      console.log("caller id",callerId)
+      io.to(callerId).emit("group_voice_call_declined", {
+        message: "Call has been declined",
+      });
+    }else {
+      console.log("Caller declined call");
+      console.log("Caller ID:", callerId, "Group ID:", groupId);
+    
+      const groupDetails = await GroupModel.findById(groupId)
+        .select("groupMembers groupAdmin")
+        .exec();
+    
+      if (!groupDetails) {
+        console.error("Group not found!");
+        return;
+      }
+    
+      let participants = groupDetails.groupMembers.map((id) => id.toString()) || [];
+    
+      const groupAdminId = groupDetails.groupAdmin.toString();
+      if (!participants.includes(groupAdminId)) {
+        participants.push(groupAdminId);
+      }
+    
+      console.log("Participants to notify:", participants);
+    
+      participants.forEach((memberId) => {
+        if (memberId.toString() !== callerId.toString()) {
+          console.log("Emitting to:", memberId);
+          io.to(memberId).emit("group_video_call_declined", {
             message: "The caller has declined the call.",
           });
         }
