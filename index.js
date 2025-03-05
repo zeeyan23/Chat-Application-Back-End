@@ -33,6 +33,7 @@ io.on('connection', (socket) => {
   socket.on("join", async(userId) => {
     socket.join(userId);
     connectedUsers[userId] = socket.id;
+    console.log(`${userId} connected with socket ID: ${socket.id}`);
   });
 
   // socket.on("sendMessage", ({ recipientId, message }) => {
@@ -700,7 +701,7 @@ app.get("/all_users/:userId", (req, res) => {
 app.post('/friend-request/',async (req, res)=>{
 
     const {currentUserId, selectedUserId} = req.body;
-
+console.log(currentUserId, selectedUserId)
     try {
         await UserModel.findByIdAndUpdate(selectedUserId,{
             $addToSet: {friendRequests : currentUserId}
@@ -711,13 +712,14 @@ app.post('/friend-request/',async (req, res)=>{
         });
 
         const sender = await UserModel.findById(currentUserId).select("user_name");
-        const recipientSocketId = connectedUsers[selectedUserId];
-        if (recipientSocketId) {
-            io.to(recipientSocketId).emit("friendRequestReceived", {
+        // const recipientSocketId = connectedUsers[selectedUserId];
+        // console.log("recipientSocketId", recipientSocketId)
+        
+            io.to(selectedUserId).emit("friendRequestReceived", {
                 senderId: currentUserId,
                 senderName: sender.user_name,
             });
-        }
+        
 
         res.sendStatus(200);
     } catch (error) {
@@ -769,17 +771,16 @@ app.post('/accept-friend-request/accept',async (req, res)=>{
         const senderSocketId = connectedUsers[senderId];
         const recepientSocketId = connectedUsers[recepientId];
 
-        if (senderSocketId) {
-            io.to(senderSocketId).emit('friendRequestAccepted', {
+       
+            io.to(senderId).emit('friendRequestAccepted', {
                 userId: recepientId,
             });
-        }
+        
 
-        if (recepientSocketId) {
-            io.to(recepientSocketId).emit('friendRequestAccepted', {
+            io.to(recepientId).emit('friendRequestAccepted', {
                 userId: senderId,
             });
-        }
+        
         res.status(200).json({message:"Friend request accepted"})
     } catch (error) {
         res.sendStatus(500);
@@ -1659,12 +1660,12 @@ app.delete('/remove_chat_from_deleted_chat', async (req, res) => {
 
 //   app.delete('/accept-friend-request/remove', async (req, res) => {
 //     try {
-//         const userId = new ObjectId("676688039c120a4cba2c52dc");
-//         const friendIdToRemove = new ObjectId("6766d8963cc557866f307da9");
+//         const userId = new ObjectId("67c81761d3fa2848fc728a19");
+//         const friendIdToRemove = new ObjectId("67c816d0d3fa2848fc728a0f");
 
 //         const result = await UserModel.updateOne(
 //             { _id: userId },
-//             { $pull: { friends: friendIdToRemove } }
+//             { $pull: { friendRequests: friendIdToRemove } }
 //         );
 
 //         if (result.modifiedCount > 0) {
@@ -1678,44 +1679,41 @@ app.delete('/remove_chat_from_deleted_chat', async (req, res) => {
 //     }
 // });
 
-// app.delete('/friend-request/remove', async (req, res) => {
-//   try {
-//       const userId = new ObjectId("6766789c9c01a2601d81bc57");
-//       const friendIdsToRemove = [
-//           new ObjectId("6777ee083fa34e323f416baa"),
-//           new ObjectId("6777ecf73fa34e323f416b2f"),
-//           new ObjectId("6777ebe63fa34e323f416a95"),
-//           new ObjectId("6777ea733fa34e323f4169f5")
-//       ]; // Replace with your array of friend IDs
-
-//       const result = await UserModel.updateOne(
-//           { _id: userId },
-//           { $pull: { groups: { $in: friendIdsToRemove } } } // Use $in to match any of the IDs in the array
-//       );
-
-//       if (result.modifiedCount > 0) {
-//           res.status(200).json({ message: "Friends removed successfully" });
-//       } else {
-//           res.status(404).json({ message: "No friends found or already removed" });
-//       }
-//   } catch (error) {
-//       console.error("Error removing friends:", error.message, error.stack);
-//       res.status(500).json({ message: "Internal Server Error", error: error.message });
-//   }
-// });
-
-app.delete('/delete-all-messages', async (req, res) => {
+app.delete('/friend-request/remove', async (req, res) => {
   try {
-      // Delete all messages
-      const result = await MessageModel.deleteMany({});
+      const userId = new ObjectId("67c81761d3fa2848fc728a19");
+      const friendIdsToRemove = [
+          new ObjectId("67c816ebd3fa2848fc728a11")
+      ]; // Replace with your array of friend IDs
 
-      // Respond with the number of deleted documents
-      return res.status(200).json({
-          success: true,
-          message: `${result.deletedCount} messages deleted successfully`,
-      });
+      const result = await UserModel.updateMany(
+          { _id: userId },
+          { $pull: { sentFriendRequests: { $in: friendIdsToRemove } } } // Use $in to match any of the IDs in the array
+      );
+
+      if (result.modifiedCount > 0) {
+          res.status(200).json({ message: "Friends removed successfully" });
+      } else {
+          res.status(404).json({ message: "No friends found or already removed" });
+      }
   } catch (error) {
-      console.error("Error deleting all messages:", error);
-      res.status(500).json({ success: false, message: "Internal server error" });
+      console.error("Error removing friends:", error.message, error.stack);
+      res.status(500).json({ message: "Internal Server Error", error: error.message });
   }
 });
+
+// app.delete('/delete-all-messages', async (req, res) => {
+//   try {
+//       // Delete all messages
+//       const result = await MessageModel.deleteMany({});
+
+//       // Respond with the number of deleted documents
+//       return res.status(200).json({
+//           success: true,
+//           message: `${result.deletedCount} messages deleted successfully`,
+//       });
+//   } catch (error) {
+//       console.error("Error deleting all messages:", error);
+//       res.status(500).json({ success: false, message: "Internal server error" });
+//   }
+// });
