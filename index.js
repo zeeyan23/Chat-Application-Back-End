@@ -1704,18 +1704,18 @@ app.delete('/remove_chat_from_deleted_chat', async (req, res) => {
 //   }
 // });
 
-// app.delete('/delete-all-messages', async (req, res) => {
-//   try {
-//       // Delete all messages
-//       const result = await MessageModel.deleteMany({});
+app.delete('/delete-all-messages', async (req, res) => {
+  try {
+      // Delete all messages
+      const result = await MessageModel.deleteMany({});
 
-//       // Respond with the number of deleted documents
-//       return res.status(200).json({
-//           success: true,
-//           message: `${result.deletedCount} messages deleted successfully`,
-//       });
-//   } catch (error) {
-//       console.error("Error deleting all messages:", error);
-//       res.status(500).json({ success: false, message: "Internal server error" });
-//   }
-// });
+      // Respond with the number of deleted documents
+      return res.status(200).json({
+          success: true,
+          message: `${result.deletedCount} messages deleted successfully`,
+      });
+  } catch (error) {
+      console.error("Error deleting all messages:", error);
+      res.status(500).json({ success: false, message: "Internal server error" });
+  }
+});
