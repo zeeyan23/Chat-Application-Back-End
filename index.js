@@ -909,14 +909,15 @@ app.post('/messages',(req, res, next) => {
           });
           
         }else{
-          console.log("📤 Emitting group message to", actualRecepientId);
+          console.log("📤 Emitting one to one message to", actualRecepientId);
           io.to(actualRecepientId).emit("newMessage", messageData);
         }
       
         
         
         if(!isGroupChat){
-          const recipient = await UserModel.findById(recepientId);
+          const recipient = await UserModel.findById(actualRecepientId);
+          console.log(recipient)
           if (!recipient || !recipient.expoPushToken) {
               return res.status(404).json({ message: "Recipient not found or push token missing." });
           }
@@ -931,6 +932,7 @@ app.post('/messages',(req, res, next) => {
               data: { senderId, recepientId, messageType, userName},
           };
 
+          console.log(notificationData)
           await axios.post('https://exp.host/--/api/v2/push/send', notificationData, {
               headers: {
                   'Content-Type': 'application/json',
