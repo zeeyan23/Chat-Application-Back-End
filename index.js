@@ -156,14 +156,6 @@ io.on('connection', (socket) => {
 
   socket.on("group_voice_calling", async (data) => {
     try {
-      const groupDetails = await GroupModel.findById(data.groupId)
-        .select("groupMembers groupAdmin")
-        .exec();
-      if (!groupDetails) {
-        console.error("Group not found");
-        return;
-      }
-  
       const callerInfo = await UserModel.findById(data.callerId).select("user_name image");
       if (!callerInfo) {
         console.error("Caller not found");
@@ -171,11 +163,7 @@ io.on('connection', (socket) => {
       }
   
       // Ensure groupAdmin is included
-      let participants = groupDetails.groupMembers.map((id) => id.toString());
-      const groupAdminId = groupDetails.groupAdmin.toString();
-      if (!participants.includes(groupAdminId)) {
-        participants.push(groupAdminId);
-      }
+      const participants = [...new Set([...data.selectedAudience, data.callerId])];
   
       // Get all participant details in one query
       const users = await UserModel.find({ _id: { $in: participants } }).select("expoPushToken");
@@ -183,8 +171,8 @@ io.on('connection', (socket) => {
       // Broadcast to all members except the caller
       await Promise.all(
         participants.map(async (memberId) => {
-          if (memberId === data.callerId) return;
-  
+          if (memberId.toString() === data.callerId.toString()) return;
+          console.log(memberId)
           io.to(memberId).emit("incoming_group_voice_call", {
             groupId: data.groupId,
             participants,
@@ -194,7 +182,7 @@ io.on('connection', (socket) => {
           });
   
           // Send push notification if token exists
-          const callee = users.find((user) => user._id.toString() === memberId);
+          const callee = users.find((user) => user._id.toString() === memberId.toString());
           if (callee?.expoPushToken) {
             const message = {
               to: callee.expoPushToken,
@@ -1074,8 +1062,8 @@ app.get("/get_chat_info/:id", async (req, res) => {
     const { id } = req.params;
     
     let userInfo = await GroupModel.findById(id)
-      .populate("groupMembers", "user_name email image")
-      .populate("groupAdmin", "user_name email image");
+      .populate("groupMembers", "_id user_name email image")
+      .populate("groupAdmin", "_id user_name email image");
 
       if (!userInfo) {
         userInfo = await UserModel.findById(id).select("user_name email image");
@@ -1085,6 +1073,40 @@ app.get("/get_chat_info/:id", async (req, res) => {
         return res.status(404).json({ error: "User or group not found" });
       }
   
+      res.status(200).json(userInfo);
+
+  } catch (error) {
+    console.log("Error:", error);
+    res.status(500).json({ error: "Failed to fetch group messages" });
+  }
+});
+
+app.get("/get_group_members/:groupId/:userId", async (req, res) => {
+  try {
+    const { groupId, userId } = req.params;
+    
+    let userInfo = await GroupModel.findById(groupId)
+      .populate("groupMembers", "_id user_name email image")
+      .populate("groupAdmin", "_id user_name email image");
+
+      if (!userInfo) {
+        userInfo = await UserModel.findById(userId).select("_id user_name email image");
+      }
+
+      if (!userInfo) {
+        return res.status(404).json({ error: "User or group not found" });
+      }
+  
+      if (userInfo.groupMembers) {
+        userInfo.groupMembers = userInfo.groupMembers.filter(
+          (member) => member._id.toString() !== userId
+        );
+      }
+  
+      if (userInfo.groupAdmin && userInfo.groupAdmin._id.toString() === userId) {
+        userInfo.groupAdmin = null; // or exclude it completely
+      }
+
       res.status(200).json(userInfo);
 
   } catch (error) {
