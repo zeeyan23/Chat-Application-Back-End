@@ -36,18 +36,6 @@ io.on('connection', (socket) => {
     console.log(`${userId} connected with socket ID: ${socket.id}`);
   });
 
-  // socket.on("sendMessage", ({ recipientId, message }) => {
-  //   io.to(recipientId).emit("newMessage", message);
-  // });
-  // socket.on("registerUser", (userId) => {
-  //   connectedUsers[userId] = socket.id;
-  // });
-
-  // socket.on("online_user", (userId) => {
-  //   console.log(`✅ Registered ${userId} with socket ID: ${socket.id}`);
-  //   online_users[userId] = socket.id;
-  // });
-
   socket.on("send_message", (data) => {
     if(data.isGroupChat){
       io.to(data.groupId).emit("receive_message", data);
@@ -57,46 +45,9 @@ io.on('connection', (socket) => {
     socket.broadcast.emit("update_chat", data);
   });
 
-  // socket.on('joinRoom', (userId) => {
-  //   socket.join(userId); 
-  // });
-
-  // socket.on("user_online", async ({ userId }) => {
-  //   users[userId] = socket.id; 
-  //   await UserModel.findByIdAndUpdate(userId, { isOnline: true });
-  //   io.emit("update_user_status", { userId, isOnline: true });
-  // });
-
-  // socket.on("user_offline", async ({ userId }) => {
-  //   const lastOnlineTime = new Date();
-  //   delete users[userId];
-  //   await UserModel.findByIdAndUpdate(userId, { isOnline: false, lastOnlineTime: new Date() });
-  //   io.emit("update_user_status", { userId, isOnline: false, lastOnlineTime });
-  // });
-
-
-  //voice call
-  // socket.on("call-user", async({ from, to, channelName, isGroupCall }) => {
-  //   if(isGroupCall){
-  //     const groupDetails = await GroupModel.findById(to).populate('groupMembers', '_id');
-  //     // Emit to each group member's room (userId)
-  //     groupDetails.groupMembers.forEach((member) => {
-  //       const memberId = member._id.toString();
-  //       if (memberId !== from) {
-  //         io.to(memberId).emit("incoming-call", { from, channelName,isGroupCall });
-  //       }
-  //     });
-  //   }else{
-  //     if (connectedUsers[to]) {
-  //       io.to(connectedUsers[to]).emit("incoming-call", { from, channelName, isGroupCall });
-  //     }
-  //   }
-  // });
-
-
   //voice call
   socket.on("voice_calling", async(data) => {
-    console.log(data)
+    
     const callerInfo = await UserModel.findById(data.callerId).select("user_name image");
     const calleeInfo = await UserModel.findById(data.calleeId).select("user_name image");
 
@@ -148,6 +99,31 @@ io.on('connection', (socket) => {
     io.to(data.calleeId).emit("voice_call_declined", data);
   });
 
+  socket.on("leave_group_voice_call", (data) => {
+
+    if(data.isCaller){
+      
+      const { userId, participants, isCaller } = data;
+      const participantIds = participants.map((p) => p.id || p);
+      participantIds.forEach((participantId) => {
+        let message;
+  
+        if (String(userId) === String(participantId)) {
+          message = "You ended the call.";
+        } else {
+          message = "The host has ended the call.";
+        }
+  
+        io.to(participantId).emit("group_call_ended", { message });
+        console.log(`Emitting to ${participantId}:`, message);
+      });
+    }else{
+      const memberIdToRemove = String(data.memberId).trim();
+      const updatedParticipants = data.participants.filter(member => member.id !== memberIdToRemove);
+      io.to(data.memberId).emit("group_call_ended", { message: "You declined the call"});
+    }
+  });
+
   socket.on("leave_voice_call", (data) => {
     io.to(data.calleeId).emit("call_ended", { message: "User has left the call" });
     io.to(data.callerId).emit("call_ended", { message: "User has left the call" });
@@ -155,7 +131,7 @@ io.on('connection', (socket) => {
 
 
   socket.on("group_voice_calling", async (data) => {
-    console.log("data", data);
+    // console.log("data", data);
     try {
       const callerInfo = await UserModel.findById(data.callerId).select("user_name image");
       if (!callerInfo) {
@@ -188,6 +164,7 @@ io.on('connection', (socket) => {
               callerId: data.callerId,
               callerName: callerInfo.user_name,
               callerImage: callerInfo.image,
+              memberId: memberId
             });
     
             // Send push notification if token exists
@@ -284,25 +261,12 @@ io.on('connection', (socket) => {
     }
   });
 
-  // socket.on("group_voice_call_accepted", (data) => {
-  //   io.to(data.callerId).emit("group_voice_call_approved", {
-  //     channelId: data.groupId,
-  //     participants: data.participants,
-  //   });
-  // });
-
   socket.on("group_voice_call_accepted", async (data) => {
     try {
-      console.log("Participants received:", data.participants);
-  
-      // Ensure valid participant IDs (filter out null/undefined and extract 'id')
       const participantIds = data.participants
         .filter((participant) => participant && participant.id) // Remove invalid entries
         .map((participant) => participant.id);
   
-      console.log("Valid participant IDs:", participantIds);
-  
-      // Fetch user details from the database
       const participantsInfo = await UserModel.find({
         _id: { $in: participantIds },
       }).select("user_name image");
@@ -376,47 +340,71 @@ io.on('connection', (socket) => {
   });
   
 
-  socket.on("decline_group_voice_call", async(callerData) => {
-    const { callerId, groupId } = callerData;
+  socket.on("decline_group_voice_call", async(data) => {
+    if(data.isCaller){
+      const { userId, participants, isCaller } = data;
+
+      participants.forEach((participantId) => {
+        let message;
+
+        // If the current participant is the one who declined the call
+        if (userId === participantId) {
+            message = "You ended the call.";
+        } else {
+            // If the caller ends the call, notify others with a different message
+            message = isCaller
+                ? "The host has ended the call."
+                : "A participant has left the call.";
+        }
+
+        // Emit the message to each participant's socket ID
+        io.to(participantId).emit("group_voice_call_declined", { message });
+      });
+    }else{
+      const memberIdToRemove = String(data.memberId).trim();
+      const updatedParticipants = data.participants.filter(member => member.id !== memberIdToRemove);
+      io.to(data.memberId).emit("group_voice_call_declined", { message: "You declined the call"});
+    }
+    // const { callerId, groupId } = callerData;
    
     
-    if(!groupId){
-      console.log("participant declined call")
-      console.log("caller id",callerId)
-      io.to(callerId).emit("group_voice_call_declined", {
-        message: "Call has been declined",
-      });
-    }else {
-      console.log("Caller declined call");
-      console.log("Caller ID:", callerId, "Group ID:", groupId);
+    // if(!groupId){
+    //   console.log("participant declined call")
+    //   console.log("caller id",callerId)
+    //   io.to(callerId).emit("group_voice_call_declined", {
+    //     message: "Call has been declined",
+    //   });
+    // }else {
+    //   console.log("Caller declined call");
+    //   console.log("Caller ID:", callerId, "Group ID:", groupId);
     
-      const groupDetails = await GroupModel.findById(groupId)
-        .select("groupMembers groupAdmin")
-        .exec();
+    //   const groupDetails = await GroupModel.findById(groupId)
+    //     .select("groupMembers groupAdmin")
+    //     .exec();
     
-      if (!groupDetails) {
-        console.error("Group not found!");
-        return;
-      }
+    //   if (!groupDetails) {
+    //     console.error("Group not found!");
+    //     return;
+    //   }
     
-      let participants = groupDetails.groupMembers.map((id) => id.toString()) || [];
+    //   let participants = groupDetails.groupMembers.map((id) => id.toString()) || [];
     
-      const groupAdminId = groupDetails.groupAdmin.toString();
-      if (!participants.includes(groupAdminId)) {
-        participants.push(groupAdminId);
-      }
+    //   const groupAdminId = groupDetails.groupAdmin.toString();
+    //   if (!participants.includes(groupAdminId)) {
+    //     participants.push(groupAdminId);
+    //   }
     
-      console.log("Participants to notify:", participants);
+    //   console.log("Participants to notify:", participants);
     
-      participants.forEach((memberId) => {
-        // if (memberId.toString() !== callerId.toString()) {
-          console.log("Emitting to:", memberId);
-          io.to(memberId).emit("group_voice_call_declined", {
-            message: "The caller has declined the call.",
-          });
-        // }
-      });
-    }
+    //   participants.forEach((memberId) => {
+    //     // if (memberId.toString() !== callerId.toString()) {
+    //       console.log("Emitting to:", memberId);
+    //       io.to(memberId).emit("group_voice_call_declined", {
+    //         message: "The caller has declined the call.",
+    //       });
+    //     // }
+    //   });
+    // }
     
   });
 
