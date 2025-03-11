@@ -124,6 +124,31 @@ io.on('connection', (socket) => {
     }
   });
 
+  socket.on("leave_group_video_call", (data) => {
+
+    if(data.isCaller){
+      
+      const { userId, participants, isCaller } = data;
+      const participantIds = participants.map((p) => p.id || p);
+      participantIds.forEach((participantId) => {
+        let message;
+  
+        if (String(userId) === String(participantId)) {
+          message = "You ended the call.";
+        } else {
+          message = "The host has ended the call.";
+        }
+  
+        io.to(participantId).emit("group_video_call_ended", { message });
+        console.log(`Emitting to ${participantId}:`, message);
+      });
+    }else{
+      const memberIdToRemove = String(data.memberId).trim();
+      const updatedParticipants = data.participants.filter(member => member.id !== memberIdToRemove);
+      io.to(data.memberId).emit("group_video_call_ended", { message: "You declined the call"});
+    }
+  });
+
   socket.on("leave_voice_call", (data) => {
     io.to(data.calleeId).emit("call_ended", { message: "User has left the call" });
     io.to(data.callerId).emit("call_ended", { message: "User has left the call" });
@@ -198,62 +223,61 @@ io.on('connection', (socket) => {
   
   socket.on("group_video_calling", async (data) => {
     try {
-      const groupDetails = await GroupModel.findById(data.groupId)
-        .select("groupMembers groupAdmin")
-        .exec();
-      if (!groupDetails) {
-        console.error("Group not found");
-        return;
-      }
-  
       const callerInfo = await UserModel.findById(data.callerId).select("user_name image");
       if (!callerInfo) {
         console.error("Caller not found");
         return;
       }
-  
-      // Ensure groupAdmin is included
-      let participants = groupDetails.groupMembers.map((id) => id.toString());
-      const groupAdminId = groupDetails.groupAdmin.toString();
-      if (!participants.includes(groupAdminId)) {
-        participants.push(groupAdminId);
-      }
-  
+      
+      const participants = Array.from(new Set(data.participants));
+      const participantsInfo = await UserModel.find({
+        _id: { $in: data.participants },
+      }).select("user_name image");
+
+      const participantDetails = participantsInfo.map((user) => ({
+        id: user._id.toString(),
+        userName: user.user_name,
+        userImage: user.image,
+      }));
+
       // Get all participant details in one query
       const users = await UserModel.find({ _id: { $in: participants } }).select("expoPushToken");
       
       // Broadcast to all members except the caller
       await Promise.all(
         participants.map(async (memberId) => {
-          if (memberId === data.callerId) return;
-  
-          io.to(memberId).emit("incoming_group_video_call", {
-            groupId: data.groupId,
-            participants,
-            callerId: data.callerId,
-            callerName: callerInfo.user_name,
-            callerImage: callerInfo.image,
-          });
-  
-          // Send push notification if token exists
-          const callee = users.find((user) => user._id.toString() === memberId);
-          if (callee?.expoPushToken) {
-            const message = {
-              to: callee.expoPushToken,
-              sound: "default",
-              title: "Incoming Group Call",
-              body: `${callerInfo.user_name} is calling you!`,
-              data: {
-                callerId: callerInfo._id,
-                callerName: callerInfo.user_name,
-                groupId: data.groupId,
-              },
-            };
-  
-            await axios.post("https://exp.host/--/api/v2/push/send", message, {
-              headers: { "Content-Type": "application/json" },
+          if(memberId != data.callerId){
+            io.to(memberId).emit("incoming_group_video_call", {
+              groupId: data.groupId,
+              participants: participantDetails,
+              isCaller: data.isCaller,
+              callerId: data.callerId,
+              callerName: callerInfo.user_name,
+              callerImage: callerInfo.image,
+              memberId: memberId
             });
+    
+            // Send push notification if token exists
+            const callee = users.find((user) => user._id.toString() === memberId.toString());
+            if (callee?.expoPushToken) {
+              const message = {
+                to: callee.expoPushToken,
+                sound: "default",
+                title: "Incoming Group Call",
+                body: `${callerInfo.user_name} is calling you!`,
+                data: {
+                  callerId: callerInfo._id,
+                  callerName: callerInfo.user_name,
+                  groupId: data.groupId,
+                },
+              };
+    
+              await axios.post("https://exp.host/--/api/v2/push/send", message, {
+                headers: { "Content-Type": "application/json" },
+              });
+            }
           }
+          
         })
       );
     } catch (error) {
@@ -290,52 +314,28 @@ io.on('connection', (socket) => {
   
   socket.on("group_video_call_accepted", async (data) => {
     try {
-      // Fetch group details and members
-      const groupDetails = await GroupModel.findById(data.groupId).populate(
-        "groupMembers",
-        "_id"
-      );
+      const participantIds = data.participants
+        .filter((participant) => participant && participant.id) // Remove invalid entries
+        .map((participant) => participant.id);
   
-      const validParticipants = data.participants.filter((id) => id);
-
-      // Fetch participant info (user_name, image)
       const participantsInfo = await UserModel.find({
-        _id: { $in: validParticipants },
+        _id: { $in: participantIds },
       }).select("user_name image");
-
+  
+      // Map to the required format for emitting back
       const participantDetails = participantsInfo.map((user) => ({
         id: user._id.toString(),
         userName: user.user_name,
         userImage: user.image,
       }));
-
-
-      const allMembers = groupDetails.groupMembers.map((member) => member._id.toString());
-      if (data.callerId && !allMembers.includes(data.callerId)) {
-        allMembers.push(data.callerId);
-      }
-
-      // Notify all group members (including the caller)
-      allMembers.forEach((memberId) => {
-        io.to(memberId).emit("group_video_call_approved", {
-          channelId: data.groupId,          // Agora channel (groupId as channelId)
-          participants: participantDetails, // List of users (id, userName, userImage)
-        });
+  
+      // Emit the approved event back to the caller
+      io.to(data.callerId).emit("group_video_call_approved", {
+        channelId: data.groupId, // Agora channel (groupId as channelId)
+        participants: participantDetails, // List of valid users
       });
-
-  
-      // Track active group calls (optional, useful for managing ongoing calls)
-      if (!global.activeGroupCalls) {
-        global.activeGroupCalls = {};
-      }
-      if (!global.activeGroupCalls[data.groupId]) {
-        global.activeGroupCalls[data.groupId] = [];
-      }
-      global.activeGroupCalls[data.groupId].push(data.userId);
-  
-      console.log(`Group voice call started for group: ${data.groupId}`);
     } catch (error) {
-      console.error("Error in group_voice_call_accepted:", error);
+      console.error("Error in group_video_call_accepted:", error);
     }
   });
   
@@ -365,89 +365,33 @@ io.on('connection', (socket) => {
       const updatedParticipants = data.participants.filter(member => member.id !== memberIdToRemove);
       io.to(data.memberId).emit("group_voice_call_declined", { message: "You declined the call"});
     }
-    // const { callerId, groupId } = callerData;
-   
-    
-    // if(!groupId){
-    //   console.log("participant declined call")
-    //   console.log("caller id",callerId)
-    //   io.to(callerId).emit("group_voice_call_declined", {
-    //     message: "Call has been declined",
-    //   });
-    // }else {
-    //   console.log("Caller declined call");
-    //   console.log("Caller ID:", callerId, "Group ID:", groupId);
-    
-    //   const groupDetails = await GroupModel.findById(groupId)
-    //     .select("groupMembers groupAdmin")
-    //     .exec();
-    
-    //   if (!groupDetails) {
-    //     console.error("Group not found!");
-    //     return;
-    //   }
-    
-    //   let participants = groupDetails.groupMembers.map((id) => id.toString()) || [];
-    
-    //   const groupAdminId = groupDetails.groupAdmin.toString();
-    //   if (!participants.includes(groupAdminId)) {
-    //     participants.push(groupAdminId);
-    //   }
-    
-    //   console.log("Participants to notify:", participants);
-    
-    //   participants.forEach((memberId) => {
-    //     // if (memberId.toString() !== callerId.toString()) {
-    //       console.log("Emitting to:", memberId);
-    //       io.to(memberId).emit("group_voice_call_declined", {
-    //         message: "The caller has declined the call.",
-    //       });
-    //     // }
-    //   });
-    // }
     
   });
 
-  socket.on("decline_group_video_call", async(callerData) => {
-    const { callerId, groupId } = callerData;
-   
-    
-    if(!groupId){
-      console.log("participant declined call")
-      console.log("caller id",callerId)
-      io.to(callerId).emit("group_voice_call_declined", {
-        message: "Call has been declined",
-      });
-    }else {
-      console.log("Caller declined call");
-      console.log("Caller ID:", callerId, "Group ID:", groupId);
-    
-      const groupDetails = await GroupModel.findById(groupId)
-        .select("groupMembers groupAdmin")
-        .exec();
-    
-      if (!groupDetails) {
-        console.error("Group not found!");
-        return;
-      }
-    
-      let participants = groupDetails.groupMembers.map((id) => id.toString()) || [];
-    
-      const groupAdminId = groupDetails.groupAdmin.toString();
-      if (!participants.includes(groupAdminId)) {
-        participants.push(groupAdminId);
-      }
-    
-      console.log("Participants to notify:", participants);
-    
-      participants.forEach((memberId) => {
-        if (memberId.toString() !== callerId.toString()) {
-          console.log("Emitting to:", memberId);
-          io.to(memberId).emit("group_video_call_declined", {
-            message: "The caller has declined the call.",
-          });
+  socket.on("decline_group_video_call", async(data) => {
+    if(data.isCaller){
+      const { userId, participants, isCaller } = data;
+
+      participants.forEach((participantId) => {
+        let message;
+
+        // If the current participant is the one who declined the call
+        if (userId === participantId) {
+            message = "You ended the call.";
+        } else {
+            // If the caller ends the call, notify others with a different message
+            message = isCaller
+                ? "The host has ended the call."
+                : "A participant has left the call.";
         }
+
+        // Emit the message to each participant's socket ID
+        io.to(participantId).emit("group_video_call_declined", { message });
       });
+    }else{
+      const memberIdToRemove = String(data.memberId).trim();
+      const updatedParticipants = data.participants.filter(member => member.id !== memberIdToRemove);
+      io.to(data.memberId).emit("group_video_call_declined", { message: "You declined the call"});
     }
     
   });
