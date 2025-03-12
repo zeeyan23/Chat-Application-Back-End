@@ -1,0 +1,305 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>Admin Panel</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate, private">
+    <meta http-equiv="Pragma" content="no-cache">
+    <meta http-equiv="Expires" content="-1">
+</head>
+
+<body class="p-4">
+    <h1 class="text-center mb-4">Welcome to the Admin Panel</h1>
+
+    <div class="container">
+        <table class="table table-striped table-bordered" id="userTable">
+            <thead>
+                <tr>
+                    <th>ID</th>
+                    <th>Name</th>
+                    <th>Email</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody id="userTableBody">
+                <!-- Data will be dynamically added here -->
+            </tbody>
+        </table>
+
+        <!-- Pagination -->
+        <nav>
+            <ul class="pagination" id="pagination"></ul>
+        </nav>
+
+        <!-- Floating Button to Add Member -->
+        <button class="btn btn-success position-fixed bottom-0 end-0 m-4" id="addMemberBtn">Add Member</button>
+        <a type="button" class="btn btn-danger position-fixed top-0 end-0 m-4" href="/logout">Logout</a>
+        <!-- Popover Form for Adding Member -->
+        <div class="modal fade" id="addMemberModal" tabindex="-1" aria-labelledby="addMemberModalLabel" aria-hidden="true">
+            <div class="modal-dialog">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h5 class="modal-title" id="addMemberModalLabel">Add New Member</h5>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                    </div>
+                    <div class="modal-body">
+                        <form id="addMemberForm">
+                            <div class="mb-3">
+                                <label for="user_name" class="form-label">Username</label>
+                                <input type="text" class="form-control" id="user_name" required>
+                            </div>
+                            <div class="mb-3">
+                                <label for="email" class="form-label">Email</label>
+                                <input type="email" class="form-control" id="email" required>
+                            </div>
+                            <div class="mb-3">
+                                <label for="password" class="form-label">Password</label>
+                                <input type="password" class="form-control" id="password" required>
+                            </div>
+                            <button type="submit" class="btn btn-primary">Submit</button>
+                        </form>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <!-- Edit Member Modal -->
+        <div class="modal fade" id="editMemberModal" tabindex="-1" aria-labelledby="editMemberModalLabel" aria-hidden="true">
+            <div class="modal-dialog">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h5 class="modal-title" id="editMemberModalLabel">Edit Member</h5>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                    </div>
+                    <div class="modal-body">
+                        <form id="editMemberForm">
+                            <input type="hidden" id="edit_user_id">
+                            <div class="mb-3">
+                                <label for="edit_user_name" class="form-label">Username</label>
+                                <input type="text" class="form-control" id="edit_user_name" required>
+                            </div>
+                            <div class="mb-3">
+                                <label for="edit_email" class="form-label">Email</label>
+                                <input type="email" class="form-control" id="edit_email" required>
+                            </div>
+                            <button type="submit" class="btn btn-primary">Update</button>
+                        </form>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        document.addEventListener("DOMContentLoaded", () => {
+
+            document.getElementById('addMemberForm').addEventListener('submit', async (e) => {
+                e.preventDefault();
+
+                const user_name = document.getElementById('user_name').value;
+                const email = document.getElementById('email').value;
+                const password = document.getElementById('password').value;
+
+                try {
+                    const response = await fetch('/add_member', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ user_name, email, password }),
+                    });
+
+                    if (response.ok) {
+                    alert('User added successfully');
+                    document.getElementById('addMemberForm').reset();
+            
+                    const modalElement = document.getElementById('addMemberModal');
+                    const modalInstance = bootstrap.Modal.getInstance(modalElement);
+                    if (modalInstance) modalInstance.hide();
+                    fetchUsers(1);
+
+                    } else {
+                    const errorText = await response.text();
+                    alert(`Error: ${errorText}`);
+                    }
+                } catch (error) {
+                    console.error('Error submitting form:', error);
+                    alert('Internal error. Please try again.');
+                }
+            });
+
+
+            document.getElementById('editMemberForm').addEventListener('submit', async (e) => {
+                e.preventDefault();
+
+                const userId = document.getElementById('edit_user_id').value;
+                const user_name = document.getElementById('edit_user_name').value;
+                const email = document.getElementById('edit_email').value;
+
+                try {
+                    const response = await fetch(`/update_user/${userId}`, {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ user_name, email }),
+                    });
+
+                    if (response.ok) {
+                        alert('User updated successfully');
+
+                        // Close the modal
+                        const editModal = bootstrap.Modal.getInstance(document.getElementById('editMemberModal'));
+                        if (editModal) editModal.hide();
+
+                        // Refresh the user list
+                        fetchUsers(1);
+                    } else {
+                        const errorText = await response.text();
+                        alert(`Error: ${errorText}`);
+                    }
+                } catch (error) {
+                    console.error('Error updating user:', error);
+                    alert('Internal error. Please try again.');
+                }
+            });
+
+
+            fetchUsers(1);
+            
+
+            // Add Member Form Submission
+            const addMemberForm = document.getElementById("addMemberForm");
+            addMemberForm.addEventListener("submit", (e) => {
+                e.preventDefault();
+
+                const newUser = {
+                    id: users.length + 1,
+                    name: document.getElementById("username").value,
+                    email: document.getElementById("email").value,
+                };
+
+                users.push(newUser);
+                renderTable(currentPage);
+                addMemberForm.reset();
+                bootstrap.Modal.getInstance(document.getElementById("addMemberModal")).hide();
+            });
+
+            // Show Add Member Modal
+            document.getElementById("addMemberBtn").addEventListener("click", () => {
+                const addMemberModal = new bootstrap.Modal(document.getElementById("addMemberModal"));
+                addMemberModal.show();
+            });
+
+            renderTable(currentPage);
+        });
+
+        async function fetchUsers(page) {
+            try {
+                const limit = 5;
+                const response = await fetch(`/get_users?page=${page}`);
+                const data = await response.json();
+
+                if (response.ok) {
+                populateTable(data.users, data.currentPage, limit);
+                setupPagination(data.totalPages, data.currentPage);
+                } else {
+                alert('Error fetching users');
+                }
+            } catch (error) {
+                console.error('Error fetching users:', error);
+                alert('Internal error. Please try again.');
+            }
+            }
+
+            // Populate the table with user data
+            function populateTable(users, currentPage, limit) {
+            const userTableBody = document.getElementById('userTableBody');
+            userTableBody.innerHTML = ''; // Clear previous data
+
+            const startIndex = (currentPage - 1) * limit;
+            users.forEach((user,index) => {
+                const row = `
+                <tr>
+                    <td>${startIndex + index + 1}</td>
+                    <td>${user.user_name}</td>
+                    <td>${user.email}</td>
+                    <td>
+                    <button class="btn btn-warning" onclick="editUser('${user._id}')">Edit</button>
+                    <button class="btn btn-danger" onclick="deleteUser('${user._id}')">Delete</button>
+                    </td>
+                </tr>
+                `;
+                userTableBody.innerHTML += row;
+            });
+            }
+
+            // Set up pagination controls
+            function setupPagination(totalPages, currentPage) {
+            const pagination = document.getElementById('pagination');
+            pagination.innerHTML = '';
+
+            for (let page = 1; page <= totalPages; page++) {
+                pagination.innerHTML += `
+                <li class="page-item ${page === currentPage ? 'active' : ''}">
+                    <a class="page-link" href="#" onclick="fetchUsers(${page})">${page}</a>
+                </li>
+                `;
+            }
+            }
+
+            async function editUser(userId) {
+                try {
+                    // Fetch user data by ID
+                    const response = await fetch(`/get_user/${userId}`);
+                    if (!response.ok) {
+                        alert('Error fetching user data');
+                        return;
+                    }
+
+                    const user = await response.json();
+
+                    // Populate the form with user data
+                    document.getElementById('edit_user_id').value = user._id;
+                    document.getElementById('edit_user_name').value = user.user_name;
+                    document.getElementById('edit_email').value = user.email;
+
+                    // Open the Edit User modal
+                    const editModal = new bootstrap.Modal(document.getElementById('editMemberModal'));
+                    editModal.show();
+
+                } catch (error) {
+                    console.error('Error fetching user data:', error);
+                    alert('Internal error. Please try again.');
+                }
+            }
+
+
+            async function deleteUser(userId) {
+                if (!confirm('Are you sure you want to delete this user?')) {
+                    return; // Exit if user cancels the confirmation
+                }
+
+                try {
+                    const response = await fetch(`/delete_user/${userId}`, {
+                        method: 'DELETE',
+                    });
+
+                    if (response.ok) {
+                        alert('User deleted successfully');
+
+                        // Refresh the table after deletion
+                        fetchUsers(1);
+                    } else {
+                        const errorText = await response.text();
+                        alert(`Error: ${errorText}`);
+                    }
+                } catch (error) {
+                    console.error('Error deleting user:', error);
+                    alert('Internal error. Please try again.');
+                }
+            }
+
+    </script>
+</body>
+
+</html>
