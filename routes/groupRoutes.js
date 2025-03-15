@@ -92,4 +92,47 @@ router.patch('/update-groupData/:userId', upload.single('file'), async (req, res
     }
   });
 
+  router.patch('/update_group_member/:groupId', async (req, res) => {
+    const { groupId } = req.params;
+    const { groupMembers } = req.body;
+
+    try {
+        if (!groupMembers || !Array.isArray(groupMembers)) {
+            return res.status(400).json({ message: 'Invalid groupMembers data' });
+        }
+        
+        const updatedGroup = await GroupModel.findByIdAndUpdate(
+            groupId,
+            { $addToSet: { groupMembers: { $each: groupMembers } } },
+            { new: true, runValidators: true }
+        );
+
+        if (!updatedGroup) {
+            return res.status(404).json({ message: 'Group not found' });
+        }
+
+        res.status(200).json({ message: 'Group members updated successfully', updatedGroup });
+    } catch (error) {
+        console.error('Error updating user data:', error);
+        res.status(500).json({ message: 'Server error', error: error.message });
+    }
+  });
+
+  router.patch('/delete_group/:id', async (req, res) => {
+    const { id } = req.params;
+
+    try {
+        const deletedGroup = await GroupModel.findByIdAndDelete(id);
+
+        if (!deletedGroup) {
+            return res.status(404).json({ message: 'Group not found' });
+        }
+
+        res.status(200).json({ message: 'Group deleted successfully', deletedGroup });
+    } catch (error) {
+        console.error('Error updating user data:', error);
+        res.status(500).json({ message: 'Server error', error: error.message });
+    }
+  });
+
 export default router;

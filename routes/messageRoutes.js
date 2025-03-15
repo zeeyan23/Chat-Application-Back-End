@@ -70,6 +70,12 @@ router.post('/messages',(req, res, next) => {
             audioUrl: messageType === 'audio' ? req.file?.path.replace(/\\/g, '/') : null,
         })
         const savedMessage = await newMessage.save();
+        const user = await UserModel.findById(recepientId);
+        const result = await UserModel.updateOne(
+          { '_id': recepientId, 'friends.0.deletedChats': senderId }, // Find the user and the specific chatId in deletedChats
+          { $pull: { 'friends.0.deletedChats': senderId } } // Remove the chatId from the deletedChats array
+        );
+
         const io = getSocketInstance();
         const messageData = await MessageModel.findById(savedMessage._id).populate("senderId", "_id user_name").populate({
           path: "replyMessage",
@@ -83,8 +89,6 @@ router.post('/messages',(req, res, next) => {
           const groupDetails = await GroupModel.findById(actualRecepientId).populate('groupMembers', '_id');
   
           if (!groupDetails) return console.error("❌ Group not found!");
-  
-          console.log("📤 Emitting group message to members:", groupDetails.groupMembers.map(m => m._id.toString()));
 
   
           // Emit to each group member's room (userId)
@@ -96,7 +100,6 @@ router.post('/messages',(req, res, next) => {
           });
           
         }else{
-          console.log("📤 Emitting one to one message to", actualRecepientId);
           io.to(actualRecepientId).emit("newMessage", messageData);
         }
       
@@ -104,7 +107,6 @@ router.post('/messages',(req, res, next) => {
         
         if(!isGroupChat){
           const recipient = await UserModel.findById(actualRecepientId);
-          console.log(recipient)
           if (!recipient || !recipient.expoPushToken) {
               return res.status(404).json({ message: "Recipient not found or push token missing." });
           }
@@ -119,7 +121,6 @@ router.post('/messages',(req, res, next) => {
               data: { senderId, recepientId, messageType, userName},
           };
 
-          console.log(notificationData)
           await axios.post('https://exp.host/--/api/v2/push/send', notificationData, {
               headers: {
                   'Content-Type': 'application/json',
