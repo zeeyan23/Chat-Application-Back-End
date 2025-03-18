@@ -2,6 +2,7 @@ import express from "express";
 import UserModel from "../model/user.model.js";
 import { getSocketInstance } from "../socket.js";
 import MessageModel from "../model/message.model.js";
+import ChatSettings from "../model/chatsetting.model.js";
 
 const router = express.Router();
 
@@ -172,5 +173,68 @@ router.post('/clear-chat', async (req, res) => {
         res.status(500).json({ message: "Internal Server Error", error: error.message });
     }
   });
+
+  router.get('/get_chat_settings/:userId/:recipentId', async (req, res) => {
+    try {
+      const { userId, recipentId } = req.params;
+
+        // Find chat settings where both userId and recipientId exist in any order
+        const chatSettings = await ChatSettings.findOne({
+            $or: [
+                { participant: userId, other_participant: recipentId },
+                { participant: recipentId, other_participant: userId }
+            ]
+        });
+
+        if (!chatSettings) {
+            return res.status(404).json({ message: "Chat settings not found" });
+        }
+
+        res.status(200).json(chatSettings);
+
+    } catch (error) {
+        console.log(error)
+        res.sendStatus(500);
+    }
+  });
+
+  router.patch('/update_chat_settings', async (req, res) => { 
+    try {
+        const { participant_id, other_participant_id, messageShouldDisappear, messageDisappearTime } = req.body;
+
+        // Try to find an existing chat settings document
+        let chat = await ChatSettings.findOne({
+            participant: participant_id,
+            other_participant: other_participant_id,
+        });
+
+        if (!chat) {
+            // If no chat settings exist, create a new one
+            chat = new ChatSettings({
+                participant: participant_id,
+                other_participant: other_participant_id,
+                messageShouldDisappear,
+                messageDisappearTime
+            });
+        } else {
+            // Update existing chat settings
+            chat.messageShouldDisappear = messageShouldDisappear;
+            chat.messageDisappearTime = messageDisappearTime;
+        }
+
+        await chat.save();
+
+        res.status(200).json({
+            success: true,
+            message: "Chat settings updated successfully",
+            chat,
+        });
+    } catch (error) {
+        console.error("Error updating chat settings:", error.message);
+        res.status(500).json({ message: "Internal Server Error", error: error.message });
+    }
+  });
+
+
 
 export default router;

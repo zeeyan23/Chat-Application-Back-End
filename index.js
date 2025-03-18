@@ -15,6 +15,8 @@ import chatRoutes from './routes/chatRoutes.js';
 import groupRoutes from './routes/groupRoutes.js';
 import adminRoutes from './routes/adminRoutes.js';
 import { initializeSocket } from "./socket.js";
+const { RtcTokenBuilder, RtcRole } = await import("agora-access-token");
+import Agora from 'agora-access-token'
 
 const app = express()
 const server = createServer(app);
@@ -31,6 +33,13 @@ dotenv.config()
 const PORT= process.env.PORT || 3000;
 const uri= process.env.MONGODB_URI;
 
+const AGORA_APP_VIDEO_ID = process.env.AGORA_APP_VIDEO_ID;
+const AGORA_APP_VIDEO_CERTIFICATE = process.env.AGORA_APP_VIDEO_CERTIFICATE;
+
+const APP_ID = process.env.AGORA_APP_ID;
+const APP_CERTIFICATE = process.env.AGORA_APP_CERTIFICATE;
+const expirationTimeInSeconds = 3600; // 24 hours
+
 try{
   mongoose.connect(uri);
   console.log("connected to MongoDB");
@@ -44,6 +53,60 @@ app.use("/friend", friendRoutes);
 app.use("/message", messageRoutes);
 app.use("/chat", chatRoutes);
 app.use("/group", groupRoutes);
+
+const generateAgoraToken = (channelName, uid) => {
+  const currentTimestamp = Math.floor(Date.now() / 1000);
+  const privilegeExpiredTs = currentTimestamp + expirationTimeInSeconds;
+
+  // Generate RTC token for voice/video call
+  return RtcTokenBuilder.buildTokenWithUid(
+    APP_ID,
+    APP_CERTIFICATE,
+    channelName,
+    uid,
+    Agora.RtcRole.PUBLISHER, // Role: PUBLISHER (Host) or SUBSCRIBER (Audience)
+    privilegeExpiredTs
+  );
+};
+
+app.get("/generate_voice_token", (req, res) => {
+  const { channelName, uid } = req.query;
+
+  if (!channelName || !uid) {
+    return res.status(400).json({ error: "Missing channelName or uid" });
+  }
+
+  const token = generateAgoraToken(channelName, parseInt(uid));
+  console.log("token from backend", token)
+  return res.json({ token });
+});
+
+const generateAgoraVideoToken = (channelName, uid) => {
+  const currentTimestamp = Math.floor(Date.now() / 1000);
+  const privilegeExpiredTs = currentTimestamp + expirationTimeInSeconds;
+
+  // Generate RTC token for voice/video call
+  return RtcTokenBuilder.buildTokenWithUid(
+    AGORA_APP_VIDEO_ID,
+    AGORA_APP_VIDEO_CERTIFICATE,
+    channelName,
+    uid,
+    Agora.RtcRole.PUBLISHER, // Role: PUBLISHER (Host) or SUBSCRIBER (Audience)
+    privilegeExpiredTs
+  );
+};
+
+app.get("/generate_video_token", (req, res) => {
+  const { channelName, uid } = req.query;
+
+  if (!channelName || !uid) {
+    return res.status(400).json({ error: "Missing channelName or uid" });
+  }
+
+  const token = generateAgoraVideoToken(channelName, parseInt(uid));
+  console.log("token from backend", token)
+  return res.json({ token });
+});
 
 server.listen(3000, () => {
   console.log('server running');

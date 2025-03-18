@@ -47,8 +47,8 @@ router.post('/messages',(req, res, next) => {
   },async (req, res)=>{
   
     try {
-        const {senderId, recepientId, messageType, message, duration, videoName, replyMessage, fileName, 
-          imageViewOnce,videoViewOnce, groupId, isGroupChat} = req.body;
+        const {senderId,recepientId, messageType, message, duration, videoName, replyMessage, 
+          fileName, imageViewOnce,videoViewOnce, groupId, isGroupChat} = req.body;
         
         const actualRecepientId = isGroupChat ? groupId : recepientId;
         const newMessage = new MessageModel({
@@ -68,6 +68,8 @@ router.post('/messages',(req, res, next) => {
             fileName: ['pdf', 'docx', 'pptx', 'xlsx', 'zip'].includes(messageType) ? fileName :null,
             videoName : messageType === 'video' ? videoName : null,
             audioUrl: messageType === 'audio' ? req.file?.path.replace(/\\/g, '/') : null,
+            // messageDisappearTime : messageDisappearTime,
+            // messageShouldDisappear : messageShouldDisappear
         })
         const savedMessage = await newMessage.save();
         const user = await UserModel.findById(recepientId);
@@ -223,6 +225,7 @@ router.patch('/viewedVideoOnce/true', async (req,res)=>{
 router.get('/get-messages/:senderId/:recepientId',async (req, res)=>{
     try {
         const {senderId, recepientId} = req.params;
+        const now = new Date();
         const message = await MessageModel.find({
             $or:[
                 {senderId : senderId, recepientId: recepientId},
@@ -231,14 +234,29 @@ router.get('/get-messages/:senderId/:recepientId',async (req, res)=>{
         })
         .populate("senderId", "_id user_name image")
         .populate({
-          path: "replyMessage", // Populate replyMessage
+          path: "replyMessage",
           populate: {
-              path: "senderId", // Nested population for senderId inside replyMessage
-              select: "_id user_name image" // Select only necessary fields
+              path: "senderId", 
+              select: "_id user_name image"
           }
         });
-        res.json({message})
 
+      const filteredMessages = message?.filter(message => {
+          const createdDateLocal = new Date(message.created_date);
+          const expiryTime = new Date(createdDateLocal.getTime()  + 24 * 60 * 60 * 1000); 
+
+          return now < expiryTime; 
+      });
+
+      const expiredMessageIds = message
+          .filter(msg => !filteredMessages.includes(msg))
+          .map(msg => msg._id);
+
+      if (expiredMessageIds.length > 0) {
+          await MessageModel.deleteMany({ _id: { $in: expiredMessageIds } });
+      }
+
+      res.json({ message: filteredMessages });
     } catch (error) {
         console.log(error)
         res.sendStatus(500);
@@ -248,10 +266,28 @@ router.get('/get-messages/:senderId/:recepientId',async (req, res)=>{
 router.get("/get-group-messages/:groupId", async (req, res) => {
   try {
     const { groupId } = req.params;
+    const now = new Date();
     const messages = await MessageModel.find({
       recepientId: groupId,
-    }).populate("senderId", "_id user_name image").populate("replyMessage");;
-    res.status(200).json({ message: messages });
+    }).populate("senderId", "_id user_name image").populate("replyMessage");
+
+    const filteredMessages = messages?.filter(message => {
+    const createdDateLocal = new Date(message.created_date);
+
+    const expiryTime = new Date(createdDateLocal.getTime()  + 24 * 60 * 60 * 1000); 
+      return now < expiryTime; 
+    });
+
+    const expiredMessageIds = messages
+        .filter(msg => !filteredMessages.includes(msg))
+        .map(msg => msg._id);
+
+    if (expiredMessageIds.length > 0) {
+        await MessageModel.deleteMany({ _id: { $in: expiredMessageIds } });
+    }
+
+    res.status(200).json({ message: filteredMessages });
+    //res.status(200).json({ message: messages });
   } catch (error) {
     console.log("Error:", error);
     res.status(500).json({ error: "Failed to fetch group messages" });

@@ -59,9 +59,7 @@ const messageSchema = new mongoose.Schema({
       }],
       clearedBy:[{
         type:mongoose.Schema.Types.ObjectId
-      }]
-
-
+      }],
 });
 
 messageSchema.pre('save', function(next) {
