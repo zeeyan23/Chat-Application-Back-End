@@ -466,4 +466,12 @@ router.post('/messages/forward', async (req, res) => {
     }
   });
 
+  router.delete('/api/delete-all', async (req, res) => {
+    try {
+      const result = await MessageModel.deleteMany({});
+      res.status(200).json({ message: 'All records deleted', deletedCount: result.deletedCount });
+    } catch (error) {
+      res.status(500).json({ error: 'Error deleting records', details: error.message });
+    }
+  });
 export default router;
