@@ -24,7 +24,8 @@ const storage = multer.diskStorage({
 const upload = multer ({storage :storage,
     limits: { fileSize: 100 * 1024 * 1024 }, 
     fileFilter: (req, file, cb) => {
-        const fileTypes = /jpeg|jpg|png|mp4|mov|pdf|docx|pptx|xlsx|zip|m4a|mp3|wav|3gp/; 
+      console.log(file)
+        const fileTypes = /jpeg|jpg|png|mp4|mov|quicktime|pdf|docx|pptx|xlsx|zip|m4a|mp3|wav|3gp/; 
         const extName = fileTypes.test(file.mimetype);
         if (extName) {
             cb(null, true);
@@ -42,6 +43,7 @@ router.post('/messages',(req, res, next) => {
         } else if (err) {
             return res.status(400).json({ error: err.message });
         }
+        console.log("Uploaded File:", req.file); 
         next();
     });
   },async (req, res)=>{
@@ -72,6 +74,7 @@ router.post('/messages',(req, res, next) => {
             // messageShouldDisappear : messageShouldDisappear
         })
         const savedMessage = await newMessage.save();
+        console.log(savedMessage)
         const user = await UserModel.findById(recepientId);
         const result = await UserModel.updateOne(
           { '_id': recepientId, 'friends.0.deletedChats': senderId }, // Find the user and the specific chatId in deletedChats
