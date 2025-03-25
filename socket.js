@@ -44,9 +44,12 @@ export const initializeSocket = (server) => {
         sound: "default",
         title: "Incoming Call",
         body: `${callerInfo.user_name} is calling you!`,
+        // data: {
+        //     callerId: callerInfo._id,
+        //     callerName: callerInfo.user_name,
+        // },
         data: {
-            callerId: callerInfo._id,
-            callerName: callerInfo.user_name,
+            screen: `chat_application://VoiceScreen/${callerInfo._id}/${callerInfo.user_name}`
         },
         };
 
@@ -185,10 +188,13 @@ export const initializeSocket = (server) => {
                     sound: "default",
                     title: "Incoming Group Call",
                     body: `${callerInfo.user_name} is calling you!`,
+                    // data: {
+                    // callerId: callerInfo._id,
+                    // callerName: callerInfo.user_name,
+                    // groupId: data.groupId,
+                    // },
                     data: {
-                    callerId: callerInfo._id,
-                    callerName: callerInfo.user_name,
-                    groupId: data.groupId,
+                        screen: `chat_application://VoiceScreen/${callerInfo._id}/${callerInfo.user_name}/${data.groupId}`
                     },
                 };
         
@@ -250,10 +256,13 @@ export const initializeSocket = (server) => {
                     sound: "default",
                     title: "Incoming Group Call",
                     body: `${callerInfo.user_name} is calling you!`,
+                    // data: {
+                    // callerId: callerInfo._id,
+                    // callerName: callerInfo.user_name,
+                    // groupId: data.groupId,
+                    // },
                     data: {
-                    callerId: callerInfo._id,
-                    callerName: callerInfo.user_name,
-                    groupId: data.groupId,
+                        screen: `chat_application://VideoScreen/${callerInfo._id}/${callerInfo.user_name}/${data.groupId}`
                     },
                 };
         
@@ -395,9 +404,12 @@ export const initializeSocket = (server) => {
         sound: "default",
         title: "Incoming Call",
         body: `${callerInfo.user_name} is calling you!`,
+        // data: {
+        //     callerId: callerInfo._id,
+        //     callerName: callerInfo.user_name,
+        // },
         data: {
-            callerId: callerInfo._id,
-            callerName: callerInfo.user_name,
+            screen: `chat_application://VideoScreen/${callerInfo._id}/${callerInfo.user_name}`
         },
         };
 
