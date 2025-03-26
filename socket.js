@@ -49,7 +49,7 @@ export const initializeSocket = (server) => {
         //     callerName: callerInfo.user_name,
         // },
         data: {
-            screen: `chat_application://VoiceScreen/${callerInfo._id}/${callerInfo.user_name}`
+            screen: `chatapp://VoiceScreen/${callerInfo._id}/${callerInfo.user_name}`
         },
         };
 
@@ -194,7 +194,7 @@ export const initializeSocket = (server) => {
                     // groupId: data.groupId,
                     // },
                     data: {
-                        screen: `chat_application://VoiceScreen/${callerInfo._id}/${callerInfo.user_name}/${data.groupId}`
+                        screen: `chatapp://VoiceScreen/${callerInfo._id}/${callerInfo.user_name}/${data.groupId}`
                     },
                 };
         
@@ -262,7 +262,7 @@ export const initializeSocket = (server) => {
                     // groupId: data.groupId,
                     // },
                     data: {
-                        screen: `chat_application://VideoScreen/${callerInfo._id}/${callerInfo.user_name}/${data.groupId}`
+                        screen: `chatapp://VideoScreen/${callerInfo._id}/${callerInfo.user_name}/${data.groupId}`
                     },
                 };
         
@@ -409,7 +409,7 @@ export const initializeSocket = (server) => {
         //     callerName: callerInfo.user_name,
         // },
         data: {
-            screen: `chat_application://VideoScreen/${callerInfo._id}/${callerInfo.user_name}`
+            screen: `chatapp://VideoScreen/${callerInfo._id}/${callerInfo.user_name}`
         },
         };
 
